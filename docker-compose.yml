@@ -1,0 +1,67 @@
+# docker-compose.yml
+services:
+  # WhisperLive STT Server
+  whisperlive:
+    image: ghcr.io/collabora/whisperlive-cpu:latest
+    container_name: whisperlive
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./models/whisper:/root/.cache/whisper
+    environment:
+      - OMP_NUM_THREADS=4
+    command: >
+      python3 run_server.py 
+      --port 9090 
+      --backend faster_whisper
+      --omp_num_threads 4
+    networks:
+      - maestrocat-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import websockets; import asyncio; asyncio.run(websockets.connect('ws://localhost:9090'))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  kokoro:
+    image: ghcr.io/remsky/kokoro-fastapi-gpu:latest   # Replace with actual image
+    container_name: kokoro
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./models/kokoro:/models
+    environment:
+      - MODEL_PATH=/models
+      - DEFAULT_VOICE=af_bella
+      - DEVICE=cpu  # or cuda if GPU available
+    networks:
+      - maestrocat-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+
+  # Redis for distributed event bus (optional)
+  redis:
+    image: redis:7-alpine
+    container_name: maestrocat-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - maestrocat-network
+    command: redis-server --appendonly yes
+
+ 
+
+networks:
+  maestrocat-network:
+    driver: bridge
+
+volumes:
+  ollama_data:
+  redis_data:
+  prometheus_data:

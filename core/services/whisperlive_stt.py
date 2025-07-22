@@ -1,0 +1,150 @@
+# maestrocat/services/whisperlive_stt.py
+"""WhisperLive STT Service for Pipecat"""
+import asyncio
+import json
+import time
+import numpy as np
+from typing import Optional, Dict, Any
+import websockets
+import logging
+
+from pipecat.frames.frames import Frame, AudioRawFrame, TranscriptionFrame, SystemFrame
+from pipecat.services.ai_services import STTService
+
+logger = logging.getLogger(__name__)
+
+
+class WhisperLiveSTTService(STTService):
+    """
+    WhisperLive WebSocket integration for Pipecat
+    Provides real-time speech-to-text using Collabora's WhisperLive
+    """
+    
+    def __init__(
+        self,
+        *,
+        host: str = "localhost",
+        port: int = 9090,
+        language: str = "en",
+        translate: bool = False,
+        model: str = "small",
+        use_vad: bool = True,
+        **kwargs
+    ):
+        super().__init__(**kwargs)
+        
+        self._host = host
+        self._port = port
+        self._language = language
+        self._translate = translate
+        self._model = model
+        self._use_vad = use_vad
+        
+        self._websocket = None
+        self._receive_task = None
+        self._audio_buffer = bytearray()
+        
+    async def start(self, frame: SystemFrame):
+        """Start the STT service"""
+        await super().start(frame)
+        await self._connect()
+        
+    async def stop(self):
+        """Stop the STT service"""
+        await super().stop()
+        
+        if self._receive_task:
+            self._receive_task.cancel()
+            
+        if self._websocket:
+            await self._websocket.close()
+            
+    async def _connect(self):
+        """Connect to WhisperLive server"""
+        try:
+            url = f"ws://{self._host}:{self._port}"
+            self._websocket = await websockets.connect(url)
+            
+            # Send configuration
+            config = {
+                "uid": f"pipecat_{int(time.time() * 1000)}",
+                "language": self._language,
+                "task": "translate" if self._translate else "transcribe",
+                "model": self._model,
+                "use_vad": self._use_vad
+            }
+            
+            await self._websocket.send(json.dumps(config))
+            logger.info(f"Connected to WhisperLive at {url}")
+            
+            # Start receive task
+            self._receive_task = asyncio.create_task(self._receive_loop())
+            
+        except Exception as e:
+            logger.error(f"Failed to connect to WhisperLive: {e}")
+            raise
+            
+    async def _receive_loop(self):
+        """Receive transcriptions from WhisperLive"""
+        try:
+            while self._websocket and not self._websocket.closed:
+                message = await self._websocket.recv()
+                
+                if isinstance(message, str):
+                    try:
+                        data = json.loads(message)
+                        await self._handle_message(data)
+                    except json.JSONDecodeError:
+                        # Plain text transcription
+                        await self._handle_transcription(message, is_final=True)
+                        
+        except websockets.exceptions.ConnectionClosed:
+            logger.warning("WhisperLive connection closed")
+        except Exception as e:
+            logger.error(f"Error in receive loop: {e}")
+            
+    async def _handle_message(self, data: Dict[str, Any]):
+        """Handle WhisperLive messages"""
+        msg_type = data.get("type", "")
+        
+        if msg_type == "transcript":
+            text = data.get("text", "")
+            if text:
+                await self._handle_transcription(text, is_final=True)
+                
+        elif msg_type == "partial":
+            text = data.get("text", "")
+            if text:
+                await self._handle_transcription(text, is_final=False)
+                
+    async def _handle_transcription(self, text: str, is_final: bool):
+        """Handle transcription and create frames"""
+        if not text:
+            return
+            
+        # Create transcription frame
+        frame = TranscriptionFrame(
+            text=text,
+            participant_id="user",
+            timestamp=time.time()
+        )
+        
+        await self.push_frame(frame)
+        
+        if is_final:
+            await self.push_frame(SystemFrame("transcription_complete"))
+            
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+        """Process audio and generate transcription frames"""
+        if not self._websocket or self._websocket.closed:
+            await self._connect()
+            
+        # Send audio to WhisperLive
+        try:
+            await self._websocket.send(audio)
+        except Exception as e:
+            logger.error(f"Error sending audio: {e}")
+            
+        # Frames are generated by the receive loop
+        # This is handled by Pipecat's frame system
+        yield  # Make this an async generator
