@@ -78,7 +78,12 @@ class WhisperLiveSTTService(STTService):
                 "task": "translate" if self._translate else "transcribe",
                 "model": self._model,
                 "use_vad": self._use_vad,
-                "vad_threshold": self._vad_threshold
+                "max_clients": 4,
+                "max_connection_time": 600,
+                "send_last_n_segments": 10,
+                "no_speech_thresh": 0.45,
+                "clip_audio": False,
+                "same_output_threshold": 10
             }
             
             await self._websocket.send(json.dumps(config))
@@ -96,17 +101,22 @@ class WhisperLiveSTTService(STTService):
         while self._websocket:
             try:
                 message = await self._websocket.recv()
-                logger.info(f"WhisperLive received: {str(message)[:200]}...")
                 
                 if isinstance(message, str):
+                    # Log full message for debugging
+                    logger.info(f"WhisperLive STRING message: {message}")
                     try:
                         data = json.loads(message)
-                        logger.info(f"WhisperLive JSON data: {data}")
+                        logger.info(f"WhisperLive JSON parsed: {data}")
                         await self._handle_message(data)
                     except json.JSONDecodeError:
                         # Plain text transcription
-                        logger.info(f"WhisperLive plain text: {message}")
+                        logger.info(f"WhisperLive PLAIN TEXT: {message}")
                         await self._handle_transcription(message, is_final=True)
+                elif isinstance(message, bytes):
+                    logger.info(f"WhisperLive BINARY message: {len(message)} bytes")
+                else:
+                    logger.info(f"WhisperLive UNKNOWN message type: {type(message)}: {message}")
                         
             except websockets.exceptions.ConnectionClosed:
                 logger.warning("WhisperLive connection closed")
@@ -165,14 +175,15 @@ class WhisperLiveSTTService(STTService):
         # Create transcription frame
         frame = TranscriptionFrame(
             text=text,
-            participant_id="user",
+            user_id="user",
             timestamp=time.time()
         )
         
         await self.push_frame(frame)
+        logger.info(f"Pushed TranscriptionFrame to pipeline: '{text}'")
         
         if is_final:
-            await self.push_frame(SystemFrame("transcription_complete"))
+            await self.push_frame(SystemFrame())
             
     async def _send_remaining_audio(self):
         """Send any remaining audio in buffer to WhisperLive"""
@@ -233,17 +244,13 @@ class WhisperLiveSTTService(STTService):
                 chunk_data = self._audio_buffer[:chunk_size]
                 self._audio_buffer = self._audio_buffer[chunk_size:]
                 
-                # Normalize audio to prevent overflow in WhisperLive
-                audio_samples = np.frombuffer(chunk_data, dtype=np.int16)
-                if len(audio_samples) > 0:
-                    # Normalize to prevent clipping/overflow
-                    max_val = np.max(np.abs(audio_samples))
-                    if max_val > 16384:  # If amplitude is high, normalize it
-                        audio_samples = (audio_samples * 16384 / max_val).astype(np.int16)
-                        chunk = audio_samples.tobytes()
-                        logger.info(f"Normalized audio chunk from max {max_val} to 16384")
-                    else:
-                        chunk = bytes(chunk_data)
+                # Convert int16 PCM to Float32Array like maestro does
+                audio_samples_int16 = np.frombuffer(chunk_data, dtype=np.int16)
+                if len(audio_samples_int16) > 0:
+                    # Convert int16 to float32 range [-1.0, 1.0] like maestro
+                    audio_samples_float32 = audio_samples_int16.astype(np.float32) / 32768.0
+                    chunk = audio_samples_float32.tobytes()
+                    logger.debug(f"Converted audio chunk: {len(audio_samples_int16)} int16 -> {len(audio_samples_float32)} float32")
                 else:
                     chunk = bytes(chunk_data)
                 
