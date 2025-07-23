@@ -1,6 +1,7 @@
 # core/serializers/raw_audio_serializer.py
 """Raw audio serializer for WhisperLive integration"""
 import json
+import numpy as np
 from pipecat.frames.frames import InputAudioRawFrame, OutputAudioRawFrame, TTSAudioRawFrame, Frame
 from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
 
@@ -27,12 +28,42 @@ class RawAudioSerializer(FrameSerializer):
                     # Already a WAV file, return as-is
                     return frame.audio
             
+            # Detect audio format and convert if needed
+            audio_data = frame.audio
+            bits_per_sample = 16  # Default to 16-bit for compatibility
+            
+            # Check if it's Float32 format (4 bytes per sample)
+            if len(audio_data) % 4 == 0:
+                try:
+                    # Try to interpret as float32
+                    audio_np = np.frombuffer(audio_data, dtype=np.float32)
+                    
+                    # Check for invalid values (NaN, infinity)
+                    if np.any(np.isnan(audio_np)) or np.any(np.isinf(audio_np)):
+                        # Skip conversion, treat as raw int16 data
+                        pass
+                    else:
+                        # Ensure values are in valid range [-1, 1] 
+                        audio_np = np.clip(audio_np, -1.0, 1.0)
+                        # Convert to 16-bit PCM for browser compatibility
+                        audio_int16 = (audio_np * 32767.0).astype(np.int16)
+                        audio_data = audio_int16.tobytes()
+                        bits_per_sample = 16
+                        print(f"Converted Float32 to Int16: {len(audio_np)} samples -> {len(audio_data)} bytes")
+                        
+                except Exception as e:
+                    print(f"Float32 conversion failed: {e}, treating as raw data")
+                    # If conversion fails, assume it's already int16
+                    pass
+            else:
+                print(f"Audio data not Float32-sized: {len(audio_data)} bytes")
+            
             # Raw PCM data, add proper WAV header
             return self._add_wav_header(
-                frame.audio, 
+                audio_data, 
                 frame.sample_rate, 
                 frame.num_channels, 
-                16  # 16-bit samples
+                bits_per_sample
             )
         
         # Return None for other frame types

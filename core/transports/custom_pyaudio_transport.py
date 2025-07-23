@@ -1,6 +1,8 @@
 import asyncio
 import pyaudio
 import threading
+import numpy as np
+from collections import deque
 
 from loguru import logger
 
@@ -83,18 +85,21 @@ class CustomPyAudioInputTransport(BaseInputTransport):
 
 
 class CustomPyAudioOutputTransport(BaseOutputTransport):
-    def __init__(self, params: TransportParams, sample_rate: int = 16000, channels: int = 1):
+    def __init__(self, params: TransportParams, sample_rate: int = 24000, channels: int = 1):
         super().__init__(params)
         self._sample_rate = sample_rate
         self._channels = channels
         self._audio = pyaudio.PyAudio()
         self._stream = None
+        self._audio_queue = deque()
+        self._min_buffer_size = int(sample_rate * 0.1)  # 100ms minimum buffer
+        self._silence_frame = np.zeros(int(sample_rate * 0.02), dtype=np.float32).tobytes()  # 20ms silence
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
         logger.info("Starting custom PyAudio output transport")
         self._stream = self._audio.open(
-            format=pyaudio.paInt16,
+            format=pyaudio.paFloat32,
             channels=self._channels,
             rate=self._sample_rate,
             output=True,
@@ -112,4 +117,58 @@ class CustomPyAudioOutputTransport(BaseOutputTransport):
 
     async def write_frame(self, frame: Frame):
         if isinstance(frame, OutputAudioRawFrame):
-            self._stream.write(frame.audio)
+            try:
+                # Simple direct write to restore audio
+                if self._stream:
+                    self._stream.write(frame.audio)
+                    logger.debug(f"Wrote audio frame: {len(frame.audio)} bytes")
+                
+            except Exception as e:
+                logger.warning(f"Audio write error: {e}")
+                # Try to write silence to keep stream active
+                try:
+                    if self._stream:
+                        self._stream.write(self._silence_frame)
+                except:
+                    pass
+    
+    def _write_with_protection(self):
+        """Write audio with buffer underrun protection"""
+        if not self._stream or not self._audio_queue:
+            return
+            
+        try:
+            # Get available space in PyAudio buffer
+            available_frames = self._stream.get_write_available()
+            
+            # Only write if we have space and audio data
+            while self._audio_queue and available_frames > 0:
+                audio_data = self._audio_queue.popleft()
+                
+                # Calculate frame count for this audio data
+                audio_np = np.frombuffer(audio_data, dtype=np.float32)
+                frame_count = len(audio_np)
+                
+                if frame_count <= available_frames:
+                    # Safe to write
+                    self._stream.write(audio_data, num_frames=frame_count)
+                    available_frames -= frame_count
+                else:
+                    # Split the audio data
+                    safe_samples = available_frames
+                    safe_audio = audio_np[:safe_samples].tobytes()
+                    remaining_audio = audio_np[safe_samples:].tobytes()
+                    
+                    # Write safe portion
+                    self._stream.write(safe_audio, num_frames=safe_samples)
+                    
+                    # Put remaining back in queue
+                    self._audio_queue.appendleft(remaining_audio)
+                    break
+                    
+        except Exception as e:
+            logger.debug(f"Buffer underrun protection error: {e}")
+            # Clear problematic audio from queue to prevent backup
+            if len(self._audio_queue) > 10:  # Prevent excessive buildup
+                self._audio_queue.clear()
+                logger.warning("Cleared audio queue due to excessive buildup")

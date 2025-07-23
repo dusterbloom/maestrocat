@@ -10,7 +10,7 @@ from pipecat.transports.base_output import BaseOutputTransport
 # Audio configuration from your working script
 SAMPLE_RATE = 16000
 CHUNK_SIZE = 1024  # PyAudio buffer size. We will get this many frames.
-FORMAT = pyaudio.paInt16 # WhisperLive works best with 16-bit integers
+FORMAT = pyaudio.paFloat32 # Use Float32 for better quality and consistency
 CHANNELS = 1
 
 class PyAudioInputTransport(BaseInputTransport):
@@ -85,7 +85,7 @@ class PyAudioOutputTransport(BaseOutputTransport):
         logger.info("Starting custom PyAudio output transport...")
         # The TTS service outputs at 16000 Hz, so we match that here.
         self._stream = self._audio.open(
-            format=pyaudio.paInt16,
+            format=FORMAT,
             channels=CHANNELS,
             rate=SAMPLE_RATE,
             output=True

@@ -39,7 +39,7 @@ class TTSConfig:
     base_url: str = "http://localhost:5000"
     voice: str = "af_bella"
     speed: float = 1.0
-    sample_rate: int = 16000
+    sample_rate: int = 24000
     
 
 @dataclass
