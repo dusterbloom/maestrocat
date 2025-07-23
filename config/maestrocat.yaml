@@ -29,7 +29,7 @@ tts:
   base_url: "http://localhost:5000"
   voice: "af_bella"
   speed: 1.0
-  sample_rate: 16000
+  sample_rate: 24000  # Kokoro typically uses 24kHz for better quality
 
 interruption:
   threshold: 0.2

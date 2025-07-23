@@ -27,9 +27,3 @@ maestrocat.egg-info/
 
 __pycache__/
 docs/llmstxt/
-
-core/processors/__pycache__
-core/transports/__pycache__
-core/utils/__pycache__
-core/services/__pycache__
-core/__pycache__

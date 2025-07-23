@@ -19,12 +19,55 @@ class RawAudioSerializer(FrameSerializer):
         """Serialize frame to WebSocket message"""
         # Handle TTS audio output frames
         if isinstance(frame, (TTSAudioRawFrame, OutputAudioRawFrame)):
-            # Return raw audio bytes for browser playback
-            # The browser expects WAV format audio from Kokoro
-            return frame.audio
+            print(f"Serializing frame: type={type(frame)}, sample_rate={frame.sample_rate}, audio_size={len(frame.audio)}")
+            
+            # Check if audio already has WAV header
+            if len(frame.audio) >= 4:
+                header = frame.audio[:4]
+                if header == b'RIFF':
+                    print(f"Frame already has WAV header, sample_rate should be {frame.sample_rate}")
+                    # Already a WAV file, return as-is
+                    return frame.audio
+            
+            print(f"Adding WAV header with sample_rate={frame.sample_rate}")
+            # Raw PCM data, add proper WAV header
+            return self._add_wav_header(
+                frame.audio, 
+                frame.sample_rate, 
+                frame.num_channels, 
+                16  # 16-bit samples
+            )
         
         # Return None for other frame types
         return None
+    
+    def _add_wav_header(self, pcm_data: bytes, sample_rate: int, num_channels: int, bits_per_sample: int) -> bytes:
+        """Add WAV header to PCM data"""
+        data_length = len(pcm_data)
+        
+        # Build WAV header
+        header = bytearray(44)
+        
+        # "RIFF" chunk descriptor
+        header[0:4] = b'RIFF'
+        header[4:8] = (data_length + 36).to_bytes(4, 'little')  # file size - 8
+        header[8:12] = b'WAVE'
+        
+        # "fmt " sub-chunk
+        header[12:16] = b'fmt '
+        header[16:20] = (16).to_bytes(4, 'little')  # subchunk size
+        header[20:22] = (1).to_bytes(2, 'little')  # audio format (1 = PCM)
+        header[22:24] = num_channels.to_bytes(2, 'little')
+        header[24:28] = sample_rate.to_bytes(4, 'little')
+        header[28:32] = (sample_rate * num_channels * (bits_per_sample // 8)).to_bytes(4, 'little')  # byte rate
+        header[32:34] = (num_channels * (bits_per_sample // 8)).to_bytes(2, 'little')  # block align
+        header[34:36] = bits_per_sample.to_bytes(2, 'little')
+        
+        # "data" sub-chunk
+        header[36:40] = b'data'
+        header[40:44] = data_length.to_bytes(4, 'little')
+        
+        return bytes(header) + pcm_data
         
     async def deserialize(self, data: str | bytes) -> Frame | None:
         """Deserialize WebSocket message to frame"""

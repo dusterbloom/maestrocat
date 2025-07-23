@@ -9,6 +9,8 @@ class MaestroCatDebugUI {
     this.isRecording = false;
     this.audioChunks = []; // Buffer for accumulating audio chunks
     this.audioContext = null;
+    this.activeSources = []; // Track active audio sources for cleanup
+    this.nextPlayTime = 0; // Track scheduling for seamless playback
     this.connect();
     this.setupEventListeners();
     this.setupAudioButton();
@@ -345,6 +347,18 @@ class MaestroCatDebugUI {
       this.scriptProcessor = null;
     }
     
+    // Stop all active audio sources
+    if (this.activeSources) {
+      this.activeSources.forEach(source => {
+        try {
+          source.stop();
+        } catch (e) {
+          // Source might already be stopped
+        }
+      });
+      this.activeSources = [];
+    }
+    
     if (this.audioContext) {
       this.audioContext.close();
       this.audioContext = null;
@@ -365,32 +379,31 @@ class MaestroCatDebugUI {
 
   async playAudioResponse(audioData) {
     try {
-      // Initialize audio context if not already done
-      if (!this.audioContext) {
-        this.audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-      }
-      
       if (audioData instanceof ArrayBuffer) {
-        // Convert raw PCM to Float32Array for Web Audio API
-        const int16Data = new Int16Array(audioData);
-        const float32Data = new Float32Array(int16Data.length);
+        const view = new DataView(audioData);
+        const first4Bytes = view.byteLength >= 4 ? 
+          String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3)) : '';
         
-        // Convert Int16 to Float32 (-1.0 to 1.0)
-        for (let i = 0; i < int16Data.length; i++) {
-          float32Data[i] = int16Data[i] / 32768.0;
+        console.log('Audio data first 4 bytes:', first4Bytes, 'Size:', view.byteLength);
+        
+        // Check if it's a WAV file (should start with "RIFF")
+        if (first4Bytes === 'RIFF') {
+          // Parse WAV header to check format
+          const sampleRate = view.getUint32(24, true);
+          const bitsPerSample = view.getUint16(34, true);
+          const numChannels = view.getUint16(22, true);
+          console.log(`WAV format: ${sampleRate}Hz, ${bitsPerSample}-bit, ${numChannels} channel(s)`);
+          
+          // Play WAV chunk directly using Web Audio API
+          await this.playWAVChunk(audioData);
+          
+        } else {
+          console.warn('Received non-WAV audio data, skipping');
         }
-        
-        // Create audio buffer
-        const audioBuffer = this.audioContext.createBuffer(1, float32Data.length, 16000);
-        audioBuffer.getChannelData(0).set(float32Data);
-        
-        // Play the buffer
-        const source = this.audioContext.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(this.audioContext.destination);
-        source.start();
-        
-        console.log('Playing audio chunk, samples:', float32Data.length);
+      } else if (audioData instanceof Blob) {
+        // Convert blob to ArrayBuffer and play
+        const arrayBuffer = await audioData.arrayBuffer();
+        await this.playWAVChunk(arrayBuffer);
       } else {
         console.error('Unexpected audio data type:', audioData);
       }
@@ -429,6 +442,74 @@ class MaestroCatDebugUI {
     wavData.set(new Uint8Array(pcmData), header.byteLength);
     
     return wavData.buffer;
+  }
+
+  async playWAVChunk(wavData) {
+    try {
+      // Initialize AudioContext if needed
+      if (!this.audioContext) {
+        this.audioContext = new AudioContext({ sampleRate: 24000 });
+        this.nextPlayTime = this.audioContext.currentTime;
+      }
+      
+      // Resume context if suspended (required for some browsers)
+      if (this.audioContext.state === 'suspended') {
+        await this.audioContext.resume();
+      }
+      
+      // Decode WAV data to AudioBuffer
+      const audioBuffer = await this.audioContext.decodeAudioData(wavData);
+      
+      // Create buffer source and connect to output
+      const source = this.audioContext.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(this.audioContext.destination);
+      
+      // Track active sources for cleanup
+      this.activeSources.push(source);
+      
+      // Remove from active sources when done
+      source.onended = () => {
+        const index = this.activeSources.indexOf(source);
+        if (index > -1) {
+          this.activeSources.splice(index, 1);
+        }
+      };
+      
+      // Schedule playback for seamless transitions
+      const currentTime = this.audioContext.currentTime;
+      const startTime = Math.max(currentTime, this.nextPlayTime);
+      
+      source.start(startTime);
+      
+      // Update next play time to end of this chunk
+      this.nextPlayTime = startTime + audioBuffer.duration;
+      
+      console.log(`Scheduled WAV chunk at ${startTime.toFixed(3)}s, duration: ${audioBuffer.duration.toFixed(3)}s, next: ${this.nextPlayTime.toFixed(3)}s`);
+      
+    } catch (error) {
+      console.error('Failed to play WAV chunk:', error);
+    }
+  }
+
+  stopAllAudio() {
+    // Stop all currently playing audio sources
+    if (this.activeSources) {
+      this.activeSources.forEach(source => {
+        try {
+          source.stop();
+        } catch (e) {
+          // Source might already be stopped
+        }
+      });
+      this.activeSources = [];
+      console.log('Stopped all audio sources for interruption');
+    }
+    
+    // Reset timing for next playback
+    if (this.audioContext) {
+      this.nextPlayTime = this.audioContext.currentTime;
+    }
   }
 
   updatePipelineStatus(active) {

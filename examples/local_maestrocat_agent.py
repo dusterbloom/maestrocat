@@ -110,8 +110,8 @@ class LocalMaestroCatAgent:
             audio_in_enabled=True,
             audio_out_enabled=True,
             audio_in_sample_rate=16000,  # WhisperLive expects 16kHz
-            audio_out_sample_rate=16000,
-            add_wav_header=False,
+            audio_out_sample_rate=24000,  # Kokoro outputs 24kHz
+            add_wav_header=False,  # We'll handle WAV headers in our serializer
             vad_analyzer=SileroVADAnalyzer(
                 params=VADParams(
                     confidence=self.config.vad.energy_threshold,
