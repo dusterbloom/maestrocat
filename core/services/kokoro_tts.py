@@ -71,7 +71,7 @@ class KokoroTTSService(TTSService):
                 async with self._current_request as response:
                     response.raise_for_status()
                     
-                    async for chunk in response.aiter_bytes(chunk_size=1024):  # Balanced chunk size
+                    async for chunk in response.aiter_bytes():  # Use natural chunk boundaries
                         if chunk:
                             # Create audio frame
                             frame = TTSAudioRawFrame(
