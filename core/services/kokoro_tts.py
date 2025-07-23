@@ -5,7 +5,7 @@ import time
 from typing import AsyncGenerator, Optional
 import logging
 
-from pipecat.frames.frames import Frame, AudioRawFrame, SystemFrame
+from pipecat.frames.frames import Frame, TTSAudioRawFrame, SystemFrame
 from pipecat.services.ai_services import TTSService
 
 logger = logging.getLogger(__name__)
@@ -66,7 +66,7 @@ class KokoroTTSService(TTSService):
                 async for chunk in response.aiter_bytes(chunk_size=8192):
                     if chunk:
                         # Create audio frame
-                        frame = AudioRawFrame(
+                        frame = TTSAudioRawFrame(
                             audio=chunk,
                             sample_rate=self._sample_rate,
                             num_channels=1

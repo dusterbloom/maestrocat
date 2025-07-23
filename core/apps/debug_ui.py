@@ -9,6 +9,7 @@ import json
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 import logging
+import os
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
@@ -16,12 +17,23 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 import uvicorn
 
-from processors import EventEmitter
-from utils import MaestroCatConfig
+from ..processors.event_emitter import EventEmitter
+from ..utils.config import MaestroCatConfig
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="MaestroCat Debug UI")
+
+# Get the directory where this file is located
+current_dir = os.path.dirname(os.path.abspath(__file__))
+# Define the path to the UI directory (corrected path)
+ui_dir = os.path.join(current_dir, "..", "..", "ui")
+# Normalize the path
+ui_dir = os.path.normpath(ui_dir)
+
+# Serve static files from the UI directory if it exists
+if os.path.exists(ui_dir):
+    app.mount("/static", StaticFiles(directory=ui_dir), name="static")
 
 
 class ConnectionManager:
@@ -110,12 +122,22 @@ class DebugUIServer:
 
 
 # Global instance
+
 debug_server = DebugUIServer()
 
 
 @app.get("/")
 async def root():
     """Serve the debug UI HTML"""
+    # If UI directory exists, serve the new UI
+    if os.path.exists(ui_dir):
+        index_path = os.path.join(ui_dir, "index.html")
+        if os.path.exists(index_path):
+            with open(index_path, "r") as f:
+                content = f.read()
+            return HTMLResponse(content=content, status_code=200)
+    
+    # Fallback to the simple HTML UI
     return HTMLResponse(content=debug_ui_html, status_code=200)
 
 
@@ -196,7 +218,7 @@ async def update_config(component: str, update: ConfigUpdate):
     return {"status": "ok"}
 
 
-# Simple HTML UI (in production, use React app from ui/ folder)
+# Simple HTML UI (fallback if ui/ directory doesn't exist)
 debug_ui_html = """
 <!DOCTYPE html>
 <html>

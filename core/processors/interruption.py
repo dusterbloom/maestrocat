@@ -2,6 +2,7 @@
 """Smart interruption handler for Pipecat"""
 import time
 import asyncio
+import json
 from typing import Optional, Dict, Any
 import logging
 
@@ -71,7 +72,8 @@ class InterruptionHandler(FrameProcessor):
         preserve_context = completion_ratio < self.threshold
         
         # Stop TTS
-        await self.push_frame(SystemFrame("interrupt_tts"))
+        # Use TextFrame to signal TTS interruption
+        await self.push_frame(TextFrame(json.dumps({"type": "interrupt_tts"})))
         
         # Log interruption
         logger.info(f"Interruption at {completion_ratio:.0%} completion")
@@ -193,7 +195,9 @@ class MetricsCollector(FrameProcessor):
         }
         
         # Emit as system frame
-        await self.push_frame(SystemFrame("metrics_update", metrics_data))
+        # Use TextFrame to carry metrics data
+        metrics_json = json.dumps({"type": "metrics_update", "data": metrics_data})
+        await self.push_frame(TextFrame(metrics_json))
         
         # Call event callback if provided
         if self.event_callback:

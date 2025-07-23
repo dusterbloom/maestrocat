@@ -3,8 +3,13 @@
 class MaestroCatDebugUI {
   constructor() {
     this.ws = null;
+    this.audioWs = null;
+    this.mediaRecorder = null;
+    this.audioStream = null;
+    this.isRecording = false;
     this.connect();
     this.setupEventListeners();
+    this.setupAudioButton();
   }
 
   connect() {
@@ -205,6 +210,177 @@ class MaestroCatDebugUI {
         }));
       }
     });
+  }
+
+  setupAudioButton() {
+    // Create an audio control button if it doesn't exist
+    const header = document.querySelector('.header');
+    if (header && !document.getElementById('audio-control')) {
+      const audioButton = document.createElement('button');
+      audioButton.id = 'audio-control';
+      audioButton.textContent = '🎤 Connect Audio';
+      audioButton.style.cssText = `
+        background: #4CAF50;
+        color: white;
+        border: none;
+        padding: 10px 15px;
+        border-radius: 5px;
+        cursor: pointer;
+        margin-left: 20px;
+      `;
+      audioButton.addEventListener('click', () => this.toggleAudio());
+      header.appendChild(audioButton);
+    }
+  }
+
+  async toggleAudio() {
+    const button = document.getElementById('audio-control');
+    
+    if (!this.isRecording) {
+      try {
+        await this.startAudio();
+        button.textContent = '🔴 Stop Audio';
+        button.style.background = '#f44336';
+        this.updatePipelineStatus(true);
+      } catch (error) {
+        console.error('Failed to start audio:', error);
+        alert('Failed to access microphone: ' + error.message);
+      }
+    } else {
+      this.stopAudio();
+      button.textContent = '🎤 Connect Audio';
+      button.style.background = '#4CAF50';
+      this.updatePipelineStatus(false);
+    }
+  }
+
+  async startAudio() {
+    // Get microphone access
+    this.audioStream = await navigator.mediaDevices.getUserMedia({ 
+      audio: {
+        sampleRate: 16000,
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true
+      } 
+    });
+    
+    // Connect to audio WebSocket
+    this.audioWs = new WebSocket(`ws://${window.location.hostname}:8765/ws`);
+    this.audioWs.binaryType = 'arraybuffer'; // Important for binary data
+    
+    this.audioWs.onopen = () => {
+      console.log('Connected to audio pipeline');
+      this.startRecording();
+    };
+    
+    this.audioWs.onmessage = (event) => {
+      console.log('Received message:', event.data);
+      // Handle audio responses (TTS audio)
+      if (event.data instanceof ArrayBuffer || event.data instanceof Blob) {
+        console.log('Received audio data, size:', event.data.size || event.data.byteLength);
+        this.playAudioResponse(event.data);
+      } else {
+        console.log('Received text message:', event.data);
+      }
+    };
+    
+    this.audioWs.onclose = () => {
+      console.log('Audio WebSocket closed');
+      this.updatePipelineStatus(false);
+    };
+    
+    this.audioWs.onerror = (error) => {
+      console.error('Audio WebSocket error:', error);
+      this.updatePipelineStatus(false);
+    };
+  }
+
+  startRecording() {
+    if (!this.audioStream) return;
+    
+    // Use Web Audio API to capture raw PCM like WhisperLive Chrome extension
+    const audioContext = new AudioContext({ sampleRate: 16000 });
+    const source = audioContext.createMediaStreamSource(this.audioStream);
+    
+    // Create script processor to capture raw audio (deprecated but still works)
+    const bufferSize = 4096; // Same as WhisperLive
+    const scriptProcessor = audioContext.createScriptProcessor(bufferSize, 1, 1);
+    
+    scriptProcessor.onaudioprocess = (event) => {
+      if (this.audioWs && this.audioWs.readyState === WebSocket.OPEN) {
+        // Get raw PCM data
+        const inputData = event.inputBuffer.getChannelData(0);
+        
+        // Convert float32 to int16 PCM like WhisperLive
+        const buffer = new ArrayBuffer(inputData.length * 2);
+        const view = new DataView(buffer);
+        
+        for (let i = 0; i < inputData.length; i++) {
+          const s = Math.max(-1, Math.min(1, inputData[i]));
+          view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+        }
+        
+        // Send raw PCM binary data
+        this.audioWs.send(buffer);
+        console.log('Sent audio chunk, size:', buffer.byteLength);
+      }
+    };
+    
+    // Connect the audio graph
+    source.connect(scriptProcessor);
+    scriptProcessor.connect(audioContext.destination);
+    
+    // Store references for cleanup
+    this.audioContext = audioContext;
+    this.scriptProcessor = scriptProcessor;
+    this.isRecording = true;
+  }
+
+  stopAudio() {
+    if (this.scriptProcessor) {
+      this.scriptProcessor.disconnect();
+      this.scriptProcessor = null;
+    }
+    
+    if (this.audioContext) {
+      this.audioContext.close();
+      this.audioContext = null;
+    }
+    
+    if (this.audioStream) {
+      this.audioStream.getTracks().forEach(track => track.stop());
+      this.audioStream = null;
+    }
+    
+    if (this.audioWs) {
+      this.audioWs.close();
+      this.audioWs = null;
+    }
+    
+    this.isRecording = false;
+  }
+
+  async playAudioResponse(audioBlob) {
+    try {
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      audio.play();
+      
+      // Clean up URL after playing
+      audio.onended = () => {
+        URL.revokeObjectURL(audioUrl);
+      };
+    } catch (error) {
+      console.error('Failed to play audio response:', error);
+    }
+  }
+
+  updatePipelineStatus(active) {
+    const statusElement = document.getElementById('pipeline-status');
+    if (statusElement) {
+      statusElement.className = `status-dot ${active ? 'status-dot-active' : ''}`;
+    }
   }
 }
 

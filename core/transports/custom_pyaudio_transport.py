@@ -4,7 +4,7 @@ import threading
 
 from loguru import logger
 
-from pipecat.frames.frames import AudioRawFrame, Frame, StartFrame, StopFrame
+from pipecat.frames.frames import InputAudioRawFrame, OutputAudioRawFrame, Frame, StartFrame, StopFrame
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import TransportParams
@@ -46,7 +46,7 @@ class CustomPyAudioInputTransport(BaseInputTransport):
         while self._running:
             try:
                 audio = await self._frames_queue.get()
-                frame = AudioRawFrame(
+                frame = InputAudioRawFrame(
                     audio=audio,
                     sample_rate=self._sample_rate,
                     num_channels=self._channels
@@ -111,5 +111,5 @@ class CustomPyAudioOutputTransport(BaseOutputTransport):
         self._audio.terminate()
 
     async def write_frame(self, frame: Frame):
-        if isinstance(frame, AudioRawFrame):
+        if isinstance(frame, OutputAudioRawFrame):
             self._stream.write(frame.audio)

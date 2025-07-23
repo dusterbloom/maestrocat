@@ -3,7 +3,7 @@ import asyncio
 import pyaudio
 from loguru import logger
 
-from pipecat.frames.frames import AudioRawFrame, StartFrame, EndFrame
+from pipecat.frames.frames import InputAudioRawFrame, OutputAudioRawFrame, StartFrame, EndFrame
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 
@@ -23,7 +23,7 @@ class PyAudioInputTransport(BaseInputTransport):
         if status:
             logger.warning(f"PyAudio callback status: {status}")
 
-        frame = AudioRawFrame(
+        frame = InputAudioRawFrame(
             audio=in_data,
             sample_rate=SAMPLE_RATE,
             num_channels=CHANNELS
@@ -99,6 +99,6 @@ class PyAudioOutputTransport(BaseOutputTransport):
         self._audio.terminate()
         logger.info("PyAudio output transport stopped.")
 
-    async def write_audio_frame(self, frame: AudioRawFrame):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame):
         if self._stream and frame.audio:
             self._stream.write(frame.audio)

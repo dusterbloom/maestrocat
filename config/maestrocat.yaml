@@ -1,3 +1,4 @@
+# config/maestrocat.yaml
 # MaestroCat Configuration
 vad:
   energy_threshold: 0.5

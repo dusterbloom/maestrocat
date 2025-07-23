@@ -3,9 +3,10 @@
 from .event_emitter import EventEmitter
 from typing import Dict, Any, List, Optional, Type
 import logging
+import json
 from abc import ABC, abstractmethod
 
-from pipecat.frames.frames import Frame, SystemFrame
+from pipecat.frames.frames import Frame, SystemFrame, TextFrame
 from pipecat.processors.frame_processor import FrameProcessor, FrameDirection
 
 logger = logging.getLogger(__name__)
@@ -69,10 +70,15 @@ class ModuleLoader(FrameProcessor):
             logger.info(f"Loaded module: {module_name}")
             
             # Emit module loaded event
-            await self.push_frame(SystemFrame("module_loaded", {
-                "name": module_name,
-                "config": config
-            }))
+            # Use TextFrame to carry module event data
+            event_data = json.dumps({
+                "type": "module_loaded", 
+                "data": {
+                    "name": module_name,
+                    "config": config
+                }
+            })
+            await self.push_frame(TextFrame(event_data))
             
         except Exception as e:
             logger.error(f"Failed to load module {module_name}: {e}")
@@ -96,9 +102,14 @@ class ModuleLoader(FrameProcessor):
             logger.info(f"Unloaded module: {module_name}")
             
             # Emit event
-            await self.push_frame(SystemFrame("module_unloaded", {
-                "name": module_name
-            }))
+            # Use TextFrame to carry module event data
+            event_data = json.dumps({
+                "type": "module_unloaded",
+                "data": {
+                    "name": module_name
+                }
+            })
+            await self.push_frame(TextFrame(event_data))
             
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Allow modules to process frames"""

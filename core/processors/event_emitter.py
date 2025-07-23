@@ -6,7 +6,7 @@ from collections import defaultdict, deque
 import time
 import logging
 
-from pipecat.frames.frames import Frame, SystemFrame
+from pipecat.frames.frames import Frame, SystemFrame, TextFrame, StartFrame, EndFrame
 from pipecat.processors.frame_processor import FrameProcessor, FrameDirection
 
 logger = logging.getLogger(__name__)
@@ -65,14 +65,23 @@ class EventEmitter(FrameProcessor):
                 
         # Emit as frame if enabled
         if self.emit_as_frames:
-            await self.push_frame(SystemFrame(f"event_{event_type}", data))
+            # Use TextFrame to carry event data as JSON
+            import json
+            event_data = json.dumps({"type": event_type, "data": data})
+            await self.push_frame(TextFrame(event_data))
             
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Convert certain frames to events"""
-        if isinstance(frame, SystemFrame):
+        # Handle StartFrame/EndFrame properly
+        if isinstance(frame, StartFrame):
+            await self.emit("pipeline_started", {})
+        elif isinstance(frame, EndFrame):
+            await self.emit("pipeline_ended", {})
+        elif isinstance(frame, SystemFrame):
             # Convert system frames to events
             await self.emit(frame.name, getattr(frame, 'data', {}))
             
+        # Always pass the frame through
         await self.push_frame(frame, direction)
         
     def get_event_history(
