@@ -41,12 +41,12 @@ class KokoroTTSService(TTSService):
         try:
             # Start TTS (removed SystemFrame - not needed for basic TTS flow)
             
-            # Prepare OpenAI-compatible request (matching Maestro format)
+            # Prepare OpenAI-compatible request (WAV format for browser compatibility)
             request_data = {
                 "model": "kokoro",
                 "input": text,
                 "voice": self._voice,
-                "response_format": "pcm",
+                "response_format": "wav",
                 "stream": True,
                 "speed": self._speed,
                 "volume_multiplier": 1.0
