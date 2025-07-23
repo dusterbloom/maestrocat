@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MaestroCat Debug UI</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>MaestroCat 🎭🐱</h1>
+            <div class="status-indicators">
+                <div class="status-item">
+                    <span class="status-dot status-dot-active"></span>
+                    <span>Connected</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-dot" id="pipeline-status"></span>
+                    <span>Pipeline</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Dashboard -->
+        <main class="dashboard">
+            <!-- Pipeline Visualization -->
+            <section class="panel pipeline-viz">
+                <h2>Pipeline Flow</h2>
+                <div class="pipeline-container">
+                    <div class="pipeline-stage" id="stage-stt">
+                        <div class="stage-icon">🎤</div>
+                        <div class="stage-name">Speech-to-Text</div>
+                        <div class="stage-latency">
+                            <span id="stt-latency">-</span>ms
+                        </div>
+                    </div>
+                    <div class="pipeline-arrow">→</div>
+                    <div class="pipeline-stage" id="stage-llm">
+                        <div class="stage-icon">🧠</div>
+                        <div class="stage-name">Language Model</div>
+                        <div class="stage-latency">
+                            <span id="llm-latency">-</span>ms
+                        </div>
+                    </div>
+                    <div class="pipeline-arrow">→</div>
+                    <div class="pipeline-stage" id="stage-tts">
+                        <div class="stage-icon">🔊</div>
+                        <div class="stage-name">Text-to-Speech</div>
+                        <div class="stage-latency">
+                            <span id="tts-latency">-</span>ms
+                        </div>
+                    </div>
+                </div>
+                <div class="total-latency">
+                    Total Latency: <span id="total-latency">-</span>ms
+                </div>
+            </section>
+
+            <!-- Conversation Panel -->
+            <section class="panel conversation">
+                <h2>Conversation</h2>
+                <div class="conversation-container" id="conversation-view">
+                    <!-- Messages will be added here dynamically -->
+                </div>
+            </section>
+
+            <!-- Configuration Panel -->
+            <section class="panel config">
+                <h2>Configuration</h2>
+                <div class="config-section">
+                    <h3>Language Model</h3>
+                    <div class="config-item">
+                        <label for="llm-model">Model</label>
+                        <select id="llm-model">
+                            <option value="llama3.2:3b">Llama 3.2 3B</option>
+                            <option value="llama3.2:7b">Llama 3.2 7B</option>
+                            <option value="mistral:7b">Mistral 7B</option>
+                        </select>
+                    </div>
+                    <div class="config-item">
+                        <label for="llm-temp">Temperature: <span id="llm-temp-value">0.7</span></label>
+                        <input type="range" id="llm-temp" min="0" max="2" step="0.1" value="0.7">
+                    </div>
+                    <div class="config-item">
+                        <label for="llm-max-tokens">Max Tokens: <span id="llm-max-tokens-value">1000</span></label>
+                        <input type="range" id="llm-max-tokens" min="100" max="2000" step="100" value="1000">
+                    </div>
+                </div>
+
+                <div class="config-section">
+                    <h3>Text-to-Speech</h3>
+                    <div class="config-item">
+                        <label for="tts-voice">Voice</label>
+                        <select id="tts-voice">
+                            <option value="af_bella">af_bella</option>
+                            <option value="af_sky">af_sky</option>
+                            <option value="am_michael">am_michael</option>
+                        </select>
+                    </div>
+                    <div class="config-item">
+                        <label for="tts-speed">Speed: <span id="tts-speed-value">1.0</span></label>
+                        <input type="range" id="tts-speed" min="0.5" max="2" step="0.1" value="1.0">
+                    </div>
+                </div>
+
+                <div class="config-section">
+                    <h3>Presets</h3>
+                    <div class="config-item">
+                        <select id="preset-select">
+                            <option value="default">Default</option>
+                            <option value="low_latency">Low Latency</option>
+                            <option value="high_quality">High Quality</option>
+                        </select>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Modules Panel -->
+            <section class="panel modules">
+                <h2>Modules</h2>
+                <div class="modules-list" id="module-list">
+                    <div class="module-item">
+                        <span class="module-status" id="module-voice-recognition-status"></span>
+                        <span class="module-name">Voice Recognition</span>
+                        <span class="module-toggle">
+                            <input type="checkbox" id="module-voice-recognition-toggle">
+                            <label for="module-voice-recognition-toggle"></label>
+                        </span>
+                    </div>
+                    <div class="module-item">
+                        <span class="module-status" id="module-memory-status"></span>
+                        <span class="module-name">Memory</span>
+                        <span class="module-toggle">
+                            <input type="checkbox" id="module-memory-toggle">
+                            <label for="module-memory-toggle"></label>
+                        </span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Event Log -->
+            <section class="panel events">
+                <h2>Event Log</h2>
+                <div class="events-container" id="event-log">
+                    <!-- Events will be added here dynamically -->
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

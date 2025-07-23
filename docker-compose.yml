@@ -2,12 +2,12 @@
 services:
   # WhisperLive STT Server
   whisperlive:
-    image: ghcr.io/collabora/whisperlive-cpu:latest
+    image: ghcr.io/collabora/whisperlive-gpu:latest
     container_name: whisperlive
     ports:
       - "9090:9090"
     volumes:
-      - ./models/whisper:/root/.cache/whisper
+      - whisper_models:/root/.cache/whisper
     environment:
       - OMP_NUM_THREADS=4
     command: >
@@ -17,6 +17,13 @@ services:
       --omp_num_threads 4
     networks:
       - maestrocat-network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     healthcheck:
       test: ["CMD", "python", "-c", "import websockets; import asyncio; asyncio.run(websockets.connect('ws://localhost:9090'))"]
       interval: 30s
@@ -29,19 +36,42 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      - ./models/kokoro:/models
+      - kokoro_models:/models
     environment:
       - MODEL_PATH=/models
       - DEFAULT_VOICE=af_bella
-      - DEVICE=cpu  # or cuda if GPU available
+      - DEVICE=cuda  # or cuda if GPU available
     networks:
       - maestrocat-network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
 
+  ollama:
+    image: ollama/ollama
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - maestrocat-network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   # Redis for distributed event bus (optional)
   redis:
@@ -55,13 +85,15 @@ services:
       - maestrocat-network
     command: redis-server --appendonly yes
 
- 
-
 networks:
   maestrocat-network:
     driver: bridge
 
 volumes:
+  whisper_models:
+  kokoro_models:
   ollama_data:
+    external:
+      name: ollama
   redis_data:
   prometheus_data:

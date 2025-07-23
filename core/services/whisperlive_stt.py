@@ -4,7 +4,7 @@ import asyncio
 import json
 import time
 import numpy as np
-from typing import Optional, Dict, Any
+from typing import AsyncGenerator, Optional, Dict, Any
 import websockets
 import logging
 
@@ -86,8 +86,8 @@ class WhisperLiveSTTService(STTService):
             
     async def _receive_loop(self):
         """Receive transcriptions from WhisperLive"""
-        try:
-            while self._websocket and not self._websocket.closed:
+        while self._websocket:
+            try:
                 message = await self._websocket.recv()
                 
                 if isinstance(message, str):
@@ -98,10 +98,12 @@ class WhisperLiveSTTService(STTService):
                         # Plain text transcription
                         await self._handle_transcription(message, is_final=True)
                         
-        except websockets.exceptions.ConnectionClosed:
-            logger.warning("WhisperLive connection closed")
-        except Exception as e:
-            logger.error(f"Error in receive loop: {e}")
+            except websockets.exceptions.ConnectionClosed:
+                logger.warning("WhisperLive connection closed")
+                break
+            except Exception as e:
+                logger.error(f"Error in receive loop: {e}")
+                break
             
     async def _handle_message(self, data: Dict[str, Any]):
         """Handle WhisperLive messages"""

@@ -1,6 +1,7 @@
 # maestrocat/processors/module_loader.py
 """Module system for extending pipelines at runtime"""
-from typing import Dict, Any, Optional, Type
+from .event_emitter import EventEmitter
+from typing import Dict, Any, List, Optional, Type
 import logging
 from abc import ABC, abstractmethod
 

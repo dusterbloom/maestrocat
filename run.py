@@ -1,16 +1,17 @@
 
 import asyncio
 import logging
+import os
 from dotenv import load_dotenv
 
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
-from pipecat.processors.aggregators.llm_context import LLMUserContextAggregator, LLMAssistantContextAggregator
-from pipecat.transports.services.local import LocalTransport
-from pipecat.vad.silero import SileroVADAnalyzer
+from pipecat.processors.aggregators.llm_response import LLMUserContextAggregator, LLMAssistantContextAggregator
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.transports.local.audio import LocalAudioTransportParams
 
-from core.processors.interruption import InterruptionHandler
+from core.transports.wsl_audio_transport import WSLAudioTransport
 from core.processors.module_loader import ModuleLoader
 from core.services.ollama_llm import OllamaLLMService
 from core.services.whisperlive_stt import WhisperLiveSTTService
@@ -22,19 +23,16 @@ logger = logging.getLogger(__name__)
 
 async def main():
     load_dotenv()
+    # Use the correct Windows host IP for PulseAudio
+    os.environ["PULSE_SERVER"] = "tcp:10.255.255.254"
 
     config = MaestroCatConfig.from_file("config/maestrocat.yaml")
 
-    transport = LocalTransport(
-        play_audio=True,
-        audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(
-            params={
-                "threshold": config.vad.energy_threshold,
-                "min_speech_duration_ms": config.vad.min_speech_ms,
-                "max_speech_duration_s": 30.0,
-                "min_silence_duration_ms": config.vad.pause_ms,
-            }
+    transport = WSLAudioTransport(
+        params=LocalAudioTransportParams(
+            audio_in_enabled=True,
+            audio_in_device_index=0,  # Use index 0 as per the working script
+            audio_out_enabled=True,
         )
     )
 
@@ -63,30 +61,24 @@ async def main():
         sample_rate=config.tts.sample_rate
     )
 
-    messages = [
+    context = OpenAILLMContext(messages=[
         {
             "role": "system",
-            "content": config.llm.system_prompt
+            "content": config.llm.system_prompt,
         }
-    ]
+    ])
 
-    user_context = LLMUserContextAggregator(messages)
-    assistant_context = LLMAssistantContextAggregator(messages)
-
-    interruption_handler = InterruptionHandler(
-        threshold=config.interruption.threshold,
-        ack_delay=config.interruption.ack_delay,
-    )
+    user_context_aggregator = LLMUserContextAggregator(context=context)
+    assistant_context_aggregator = LLMAssistantContextAggregator(context=context)
 
     module_loader = ModuleLoader()
 
     pipeline = Pipeline([
         transport.input(),
         stt,
-        user_context,
-        interruption_handler,
+        user_context_aggregator,
         llm,
-        assistant_context,
+        assistant_context_aggregator,
         tts,
         module_loader,
         transport.output()

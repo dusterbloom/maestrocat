@@ -1,4 +1,35 @@
-.env
-__pycahce__
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
 .venv/
-maestrocat.egg-info
+venv/
+env/
+
+# IDE / editor specific
+.vscode/
+.idea/
+
+# Logs and temporary files
+*.log
+*.tmp
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+
+.venv/
+maestrocat.egg-info/
+
+__pycache__/
+docs/llmstxt/
+
+core/processors/__pycache__
+core/transports/__pycache__
+core/utils/__pycache__
+core/services/__pycache__
+core/__pycache__
