@@ -150,7 +150,8 @@ class StressTestRunner:
                 
                 try:
                     # Send the request
-                    await pipeline.process_frame(TextFrame(text))
+                    from pipecat.processors.frame_processor import FrameDirection
+                    await pipeline.process_frame(TextFrame(text), FrameDirection.DOWNSTREAM)
                     
                     # Record time
                     req_end = time.time()

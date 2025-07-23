@@ -13,7 +13,7 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.transports.local.audio import LocalAudioTransportParams
-from pipecat.frames.frames import TextFrame
+from pipecat.frames.frames import TextFrame, TranscriptionFrame
 
 from core.transports.wsl_audio_transport import WSLAudioTransport
 from core.processors.interruption import MetricsCollector
@@ -105,19 +105,22 @@ class LatencyTestRunner:
             transport.output()
         ])
         
-        return pipeline
+        return pipeline, transport
         
     async def run_latency_test(self, test_input: str, iterations: int = 5) -> Dict[str, Any]:
         """Run latency test with specified input"""
         logger.info(f"Running latency test with input: '{test_input}' for {iterations} iterations")
         
         # Set up pipeline
-        pipeline = await self.setup_pipeline()
+        pipeline, transport = await self.setup_pipeline()
         runner = PipelineRunner()
         task = PipelineTask(pipeline)
         
         # Store timing results
         iteration_results = []
+        
+        # Start the pipeline runner in the background
+        runner_task = asyncio.create_task(runner.run(task))
         
         # Run test iterations
         for i in range(iterations):
@@ -129,14 +132,11 @@ class LatencyTestRunner:
             # Start timing
             start_time = time.time()
             
-            # Send test input
-            await pipeline.process_frame(TextFrame(test_input))
+            # Send test input as a TranscriptionFrame which is what STT would produce
+            await transport.send_frame(TranscriptionFrame(test_input, "", 0))
             
-            # Run for a short duration to capture response
-            try:
-                await asyncio.wait_for(runner.run(task), timeout=10.0)
-            except asyncio.TimeoutError:
-                pass
+            # Give some time for processing (this is a simplification for testing)
+            await asyncio.sleep(3)
             
             # End timing
             end_time = time.time()
@@ -148,6 +148,9 @@ class LatencyTestRunner:
             # Wait between iterations
             await asyncio.sleep(1)
             
+        # Cancel the runner task
+        runner_task.cancel()
+        
         # Calculate statistics
         avg_time = statistics.mean(iteration_results)
         min_time = min(iteration_results)
