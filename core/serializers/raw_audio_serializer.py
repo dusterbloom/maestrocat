@@ -19,17 +19,14 @@ class RawAudioSerializer(FrameSerializer):
         """Serialize frame to WebSocket message"""
         # Handle TTS audio output frames
         if isinstance(frame, (TTSAudioRawFrame, OutputAudioRawFrame)):
-            print(f"Serializing frame: type={type(frame)}, sample_rate={frame.sample_rate}, audio_size={len(frame.audio)}")
             
             # Check if audio already has WAV header
             if len(frame.audio) >= 4:
                 header = frame.audio[:4]
                 if header == b'RIFF':
-                    print(f"Frame already has WAV header, sample_rate should be {frame.sample_rate}")
                     # Already a WAV file, return as-is
                     return frame.audio
             
-            print(f"Adding WAV header with sample_rate={frame.sample_rate}")
             # Raw PCM data, add proper WAV header
             return self._add_wav_header(
                 frame.audio, 
