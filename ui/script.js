@@ -7,6 +7,8 @@ class MaestroCatDebugUI {
     this.mediaRecorder = null;
     this.audioStream = null;
     this.isRecording = false;
+    this.audioChunks = []; // Buffer for accumulating audio chunks
+    this.audioContext = null;
     this.connect();
     this.setupEventListeners();
     this.setupAudioButton();
@@ -361,19 +363,72 @@ class MaestroCatDebugUI {
     this.isRecording = false;
   }
 
-  async playAudioResponse(audioBlob) {
+  async playAudioResponse(audioData) {
     try {
-      const audioUrl = URL.createObjectURL(audioBlob);
-      const audio = new Audio(audioUrl);
-      audio.play();
+      // Initialize audio context if not already done
+      if (!this.audioContext) {
+        this.audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+      }
       
-      // Clean up URL after playing
-      audio.onended = () => {
-        URL.revokeObjectURL(audioUrl);
-      };
+      if (audioData instanceof ArrayBuffer) {
+        // Convert raw PCM to Float32Array for Web Audio API
+        const int16Data = new Int16Array(audioData);
+        const float32Data = new Float32Array(int16Data.length);
+        
+        // Convert Int16 to Float32 (-1.0 to 1.0)
+        for (let i = 0; i < int16Data.length; i++) {
+          float32Data[i] = int16Data[i] / 32768.0;
+        }
+        
+        // Create audio buffer
+        const audioBuffer = this.audioContext.createBuffer(1, float32Data.length, 16000);
+        audioBuffer.getChannelData(0).set(float32Data);
+        
+        // Play the buffer
+        const source = this.audioContext.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(this.audioContext.destination);
+        source.start();
+        
+        console.log('Playing audio chunk, samples:', float32Data.length);
+      } else {
+        console.error('Unexpected audio data type:', audioData);
+      }
     } catch (error) {
       console.error('Failed to play audio response:', error);
     }
+  }
+
+  addWavHeader(pcmData, sampleRate, numChannels, bitsPerSample) {
+    const dataLength = pcmData.byteLength;
+    const header = new ArrayBuffer(44);
+    const view = new DataView(header);
+    
+    // "RIFF" chunk descriptor
+    view.setUint32(0, 0x46464952, false); // "RIFF"
+    view.setUint32(4, dataLength + 36, true); // file size - 8
+    view.setUint32(8, 0x45564157, false); // "WAVE"
+    
+    // "fmt " sub-chunk
+    view.setUint32(12, 0x20746d66, false); // "fmt "
+    view.setUint32(16, 16, true); // subchunk size
+    view.setUint16(20, 1, true); // audio format (1 = PCM)
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * numChannels * (bitsPerSample / 8), true); // byte rate
+    view.setUint16(32, numChannels * (bitsPerSample / 8), true); // block align
+    view.setUint16(34, bitsPerSample, true);
+    
+    // "data" sub-chunk
+    view.setUint32(36, 0x61746164, false); // "data"
+    view.setUint32(40, dataLength, true);
+    
+    // Combine header and PCM data
+    const wavData = new Uint8Array(header.byteLength + dataLength);
+    wavData.set(new Uint8Array(header), 0);
+    wavData.set(new Uint8Array(pcmData), header.byteLength);
+    
+    return wavData.buffer;
   }
 
   updatePipelineStatus(active) {

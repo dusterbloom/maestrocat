@@ -1,7 +1,7 @@
 # core/serializers/raw_audio_serializer.py
 """Raw audio serializer for WhisperLive integration"""
 import json
-from pipecat.frames.frames import InputAudioRawFrame, Frame
+from pipecat.frames.frames import InputAudioRawFrame, OutputAudioRawFrame, TTSAudioRawFrame, Frame
 from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
 
 class RawAudioSerializer(FrameSerializer):
@@ -17,8 +17,13 @@ class RawAudioSerializer(FrameSerializer):
         
     async def serialize(self, frame: Frame) -> str | bytes | None:
         """Serialize frame to WebSocket message"""
-        # For audio output, we'll need to handle this differently
-        # For now, just return None for non-audio frames
+        # Handle TTS audio output frames
+        if isinstance(frame, (TTSAudioRawFrame, OutputAudioRawFrame)):
+            # Return raw audio bytes for browser playback
+            # The browser expects WAV format audio from Kokoro
+            return frame.audio
+        
+        # Return None for other frame types
         return None
         
     async def deserialize(self, data: str | bytes) -> Frame | None:
