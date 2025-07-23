@@ -9,7 +9,7 @@ import websockets
 import logging
 
 from pipecat.frames.frames import Frame, AudioRawFrame, InputAudioRawFrame, UserAudioRawFrame, TranscriptionFrame, SystemFrame, UserStartedSpeakingFrame, UserStoppedSpeakingFrame
-from pipecat.services.ai_services import STTService
+from pipecat.services.stt_service import STTService
 from pipecat.processors.frame_processor import FrameDirection
 
 logger = logging.getLogger(__name__)
@@ -48,6 +48,8 @@ class WhisperLiveSTTService(STTService):
         self._audio_buffer = bytearray()
         self._user_speaking = False
         self._client_uid = None
+        self._processed_segments = set()  # Track processed segments to avoid duplicates
+        self._max_segments = 100  # Limit memory usage
         
     async def start(self, frame: SystemFrame):
         """Start the STT service"""
@@ -103,11 +105,11 @@ class WhisperLiveSTTService(STTService):
                 message = await self._websocket.recv()
                 
                 if isinstance(message, str):
-                    # Log full message for debugging
-                    logger.info(f"WhisperLive STRING message: {message}")
                     try:
                         data = json.loads(message)
-                        logger.info(f"WhisperLive JSON parsed: {data}")
+                        # Only log SERVER_READY messages to reduce spam
+                        if "message" in data and data.get("message") == "SERVER_READY":
+                            logger.info(f"WhisperLive server ready")
                         await self._handle_message(data)
                     except json.JSONDecodeError:
                         # Plain text transcription
@@ -135,12 +137,25 @@ class WhisperLiveSTTService(STTService):
         # Handle segments (main transcription format)
         if "segments" in data:
             segments = data["segments"]
-            logger.info(f"Received {len(segments)} transcription segments")
             
             for segment in segments:
                 text = segment.get("text", "").strip()
-                if text:
-                    # WhisperLive segments are generally final transcriptions
+                completed = segment.get("completed", False)
+                start = segment.get("start", "")
+                end = segment.get("end", "")
+                
+                # Create unique segment identifier
+                segment_id = f"{start}-{end}-{text}"
+                
+                if text and completed and segment_id not in self._processed_segments:
+                    # Only process new completed segments
+                    self._processed_segments.add(segment_id)
+                    
+                    # Limit memory usage by clearing old segments
+                    if len(self._processed_segments) > self._max_segments:
+                        # Keep only the most recent segments (simple cleanup)
+                        self._processed_segments = set(list(self._processed_segments)[-50:])
+                    
                     await self._handle_transcription(text, is_final=True)
                     
         # Handle legacy format (if any)
@@ -170,7 +185,27 @@ class WhisperLiveSTTService(STTService):
         if not text:
             return
             
-        logger.info(f"Creating transcription frame: '{text}' (final: {is_final})")
+        # Filter out common Whisper hallucinations
+        hallucination_phrases = [
+            "thanks for watching",
+            "see you in the next video",
+            "don't forget to subscribe",
+            "like and subscribe",
+            "thank you for watching",
+            "see you next time",
+            "music playing",
+            "applause",
+            "laughter"
+        ]
+        
+        text_lower = text.lower().strip()
+        if any(phrase in text_lower for phrase in hallucination_phrases):
+            logger.warning(f"🚫 Filtered hallucination: '{text}'")
+            return
+            
+        # Only log final transcriptions to reduce noise
+        if is_final:
+            logger.info(f"Final transcription: '{text}'")
         
         # Create transcription frame
         frame = TranscriptionFrame(
@@ -180,10 +215,8 @@ class WhisperLiveSTTService(STTService):
         )
         
         await self.push_frame(frame)
-        logger.info(f"Pushed TranscriptionFrame to pipeline: '{text}'")
-        
         if is_final:
-            await self.push_frame(SystemFrame())
+            logger.info(f"→ Sent to LLM: '{text}'")
             
     async def _send_remaining_audio(self):
         """Send any remaining audio in buffer to WhisperLive"""
@@ -230,38 +263,42 @@ class WhisperLiveSTTService(STTService):
             max_amplitude = np.max(np.abs(audio_samples)) if len(audio_samples) > 0 else 0
             non_zero_samples = np.count_nonzero(audio_samples)
             
-            # Only log audio with significant amplitude to reduce noise
-            if max_amplitude > 1000:
+            # Only process audio with significant amplitude to avoid overwhelming WhisperLive
+            silence_threshold = 2000  # Much higher threshold to prevent hallucinations
+            
+            if max_amplitude > silence_threshold:
                 logger.debug(f"Audio: {len(frame.audio)} bytes, max_amplitude: {max_amplitude}, non_zero: {non_zero_samples}/{len(audio_samples)}")
-            
-            # Stream all audio continuously to WhisperLive (like browser extension)
-            # Add audio to buffer
-            self._audio_buffer.extend(frame.audio)
-            
-            # Send chunks of audio to WhisperLive (small chunks for real-time like browser extension)
-            chunk_size = 8192   # 0.25 second of audio at 16kHz mono int16 - matches browser pattern
-            while len(self._audio_buffer) >= chunk_size:
-                chunk_data = self._audio_buffer[:chunk_size]
-                self._audio_buffer = self._audio_buffer[chunk_size:]
                 
-                # Convert int16 PCM to Float32Array like maestro does
-                audio_samples_int16 = np.frombuffer(chunk_data, dtype=np.int16)
-                if len(audio_samples_int16) > 0:
-                    # Convert int16 to float32 range [-1.0, 1.0] like maestro
-                    audio_samples_float32 = audio_samples_int16.astype(np.float32) / 32768.0
-                    chunk = audio_samples_float32.tobytes()
-                    logger.debug(f"Converted audio chunk: {len(audio_samples_int16)} int16 -> {len(audio_samples_float32)} float32")
-                else:
-                    chunk = bytes(chunk_data)
+                # Add audio to buffer only if it contains speech
+                self._audio_buffer.extend(frame.audio)
                 
-                if self._websocket and not self._websocket.closed:
-                    try:
-                        await self._websocket.send(chunk)
-                        logger.debug(f"Sent audio chunk: {len(chunk)} bytes, buffer remaining: {len(self._audio_buffer)}")
-                    except Exception as e:
-                        logger.error(f"Error sending audio to WhisperLive: {e}")
-                else:
-                    logger.warning(f"WebSocket not available for sending audio chunk")
+                # Send chunks of audio to WhisperLive (larger chunks to reduce processing load)
+                chunk_size = 16384   # 0.5 second of audio at 16kHz mono int16 - reduce chunk frequency
+                while len(self._audio_buffer) >= chunk_size:
+                    chunk_data = self._audio_buffer[:chunk_size]
+                    self._audio_buffer = self._audio_buffer[chunk_size:]
+                    
+                    # Convert int16 PCM to Float32Array like maestro does
+                    audio_samples_int16 = np.frombuffer(chunk_data, dtype=np.int16)
+                    if len(audio_samples_int16) > 0:
+                        # Convert int16 to float32 range [-1.0, 1.0] like maestro
+                        audio_samples_float32 = audio_samples_int16.astype(np.float32) / 32768.0
+                        chunk = audio_samples_float32.tobytes()
+                        logger.debug(f"Converted audio chunk: {len(audio_samples_int16)} int16 -> {len(audio_samples_float32)} float32")
+                    else:
+                        chunk = bytes(chunk_data)
+                    
+                    if self._websocket and not self._websocket.closed:
+                        try:
+                            await self._websocket.send(chunk)
+                            logger.debug(f"Sent audio chunk: {len(chunk)} bytes, buffer remaining: {len(self._audio_buffer)}")
+                        except Exception as e:
+                            logger.error(f"Error sending audio to WhisperLive: {e}")
+                    else:
+                        logger.warning(f"WebSocket not available for sending audio chunk")
+            else:
+                # For silence, just discard the audio to avoid overwhelming WhisperLive
+                logger.debug(f"Silence detected (max_amplitude: {max_amplitude}), discarding audio")
                         
             # Pass the frame downstream
             await self.push_frame(frame, direction)

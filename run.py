@@ -13,7 +13,7 @@ from pipecat.transports.local.audio import LocalAudioTransportParams
 
 from core.transports.wsl_audio_transport import WSLAudioTransport
 from core.processors.module_loader import ModuleLoader
-from core.services.ollama_llm import OllamaLLMService
+from core.services.ollama_llm import OLLamaLLMService
 from core.services.whisperlive_stt import WhisperLiveSTTService
 from core.services.kokoro_tts import KokoroTTSService
 from core.utils.config import MaestroCatConfig
@@ -45,7 +45,7 @@ async def main():
         use_vad=config.stt.use_vad
     )
 
-    llm = OllamaLLMService(
+    llm = OLLamaLLMService(
         base_url=config.llm.base_url,
         model=config.llm.model,
         temperature=config.llm.temperature,

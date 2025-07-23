@@ -25,6 +25,7 @@ from pipecat.transports.network.fastapi_websocket import (
 )
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 
 # MaestroCat imports
 import sys
@@ -38,9 +39,30 @@ from core.processors import (
 )
 from core.services import (
     WhisperLiveSTTService,
-    OllamaLLMService,
     KokoroTTSService
 )
+# Monkey-patch fix for OLLamaLLMService api_key conflict bug in Pipecat 0.0.76
+import pipecat.services.ollama.llm as _ollama
+from pipecat.services.openai.base_llm import BaseOpenAILLMService
+
+_orig_init = _ollama.OLLamaLLMService.__init__
+_orig_create_client = _ollama.OLLamaLLMService.create_client
+
+def fixed_init(self, *, model="llama3.2:3b", base_url="http://localhost:11434/v1", **kwargs):
+    # Remove api_key if passed in kwargs to avoid duplicate argument error
+    kwargs.pop("api_key", None)
+    return _orig_init(self, model=model, base_url=base_url, **kwargs)
+
+def fixed_create_client(self, base_url=None, **kwargs):
+    # Remove api_key from kwargs to avoid conflict
+    kwargs.pop("api_key", None)
+    # Call grandparent's create_client directly to bypass the broken super() call
+    return BaseOpenAILLMService.create_client(self, api_key="ollama", base_url=base_url, **kwargs)
+
+_ollama.OLLamaLLMService.__init__ = fixed_init
+_ollama.OLLamaLLMService.create_client = fixed_create_client
+
+from pipecat.services.ollama.llm import OLLamaLLMService
 from core.utils import MaestroCatConfig
 from core.modules import VoiceRecognitionModule, MemoryModule
 from core.apps.debug_ui import DebugUIServer
@@ -112,14 +134,12 @@ class LocalMaestroCatAgent:
             vad_threshold=0.3  # More sensitive VAD threshold
         )
         
-        # Create LLM service (Ollama)
-        llm = OllamaLLMService(
-            base_url=self.config.llm.base_url,
+        # Create LLM service (Ollama) - using official Pipecat pattern
+        # The service automatically appends /v1 to base_url, so use raw Ollama URL
+        ollama_base_url = self.config.llm.base_url + "/v1" if not "/v1" in self.config.llm.base_url else self.config.llm.base_url
+        llm = OLLamaLLMService(
             model=self.config.llm.model,
-            temperature=self.config.llm.temperature,
-            max_tokens=self.config.llm.max_tokens,
-            top_p=self.config.llm.top_p,
-            top_k=self.config.llm.top_k
+            base_url=ollama_base_url
         )
         
         # Create TTS service (Kokoro)
@@ -166,13 +186,27 @@ class LocalMaestroCatAgent:
         # Create transport for this WebSocket
         transport = FastAPIWebsocketTransport(websocket, self.transport_params)
         
-        # Build the pipeline (simplified to avoid frame ordering issues)
+        # Create LLM context with system message
+        context = OpenAILLMContext(messages=[
+            {
+                "role": "system",
+                "content": "You are MaestroCat, a helpful AI voice assistant. Respond naturally and conversationally. Keep responses concise but engaging."
+            }
+        ])
+        
+        # Create context aggregators using the LLM service
+        context_aggregator = self.llm.create_context_aggregator(context)
+        
+        # Build the pipeline with proper context management
         pipeline = Pipeline([
             # Input
             transport.input(),
             
             # STT
             self.stt,
+            
+            # User context aggregation (TranscriptionFrame → LLM trigger)
+            context_aggregator.user(),
             
             # LLM
             self.llm,
@@ -181,7 +215,10 @@ class LocalMaestroCatAgent:
             self.tts,
             
             # Output
-            transport.output()
+            transport.output(),
+            
+            # Assistant context aggregation (LLM response handling)
+            context_aggregator.assistant(),
         ])
         
         return pipeline, transport

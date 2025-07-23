@@ -119,7 +119,7 @@ class MaestroCatTester:
                 MetricsCollector,
                 EventEmitter,
                 WhisperLiveSTTService,
-                OllamaLLMService,
+                OLLamaLLMService,
                 KokoroTTSService
             )
             
@@ -142,12 +142,12 @@ class MaestroCatTester:
         
         try:
             from pipecat.pipeline.pipeline import Pipeline
-            from maestrocat.services import WhisperLiveSTTService, OllamaLLMService
+            from maestrocat.services import WhisperLiveSTTService, OLLamaLLMService
             from maestrocat.processors import MetricsCollector
             
             # Create services
             stt = WhisperLiveSTTService(host="localhost", port=9090)
-            llm = OllamaLLMService(model="llama3.2:3b")
+            llm = OLLamaLLMService(model="llama3.2:3b")
             metrics = MetricsCollector()
             
             # Create pipeline

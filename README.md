@@ -52,11 +52,11 @@ docker-compose ps
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.transports.services.daily import DailyTransport
 from maestrocat.processors import InterruptionHandler, MetricsCollector
-from maestrocat.services import WhisperLiveSTTService, OllamaLLMService, KokoroTTSService
+from maestrocat.services import WhisperLiveSTTService, OLLamaLLMService, KokoroTTSService
 
 # Create services
 stt = WhisperLiveSTTService(host="localhost", port=9090)
-llm = OllamaLLMService(model="llama3.2:3b", temperature=0.7)
+llm = OLLamaLLMService(model="llama3.2:3b", temperature=0.7)
 tts = KokoroTTSService(voice="af_bella")
 
 # Create processors
@@ -93,7 +93,7 @@ open http://localhost:8080
 ### Services
 
 - **WhisperLiveSTTService**: Real-time speech-to-text using Collabora's WhisperLive
-- **OllamaLLMService**: Local LLM inference with streaming support
+- **OLLamaLLMService**: Local LLM inference with streaming support
 - **KokoroTTSService**: High-quality text-to-speech (or Piper as alternative)
 
 ### Processors

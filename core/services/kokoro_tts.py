@@ -6,7 +6,7 @@ from typing import AsyncGenerator, Optional
 import logging
 
 from pipecat.frames.frames import Frame, TTSAudioRawFrame, SystemFrame
-from pipecat.services.ai_services import TTSService
+from pipecat.services.tts_service import TTSService
 
 logger = logging.getLogger(__name__)
 
@@ -39,31 +39,28 @@ class KokoroTTSService(TTSService):
         """Generate speech from text"""
         
         try:
-            # Start TTS
-            yield SystemFrame("tts_started", {
-                "text": text,
-                "voice": self._voice
-            })
+            # Start TTS (removed SystemFrame - not needed for basic TTS flow)
             
-            # Prepare request
+            # Prepare OpenAI-compatible request (matching Maestro format)
             request_data = {
-                "text": text,
+                "model": "kokoro",
+                "input": text,
                 "voice": self._voice,
+                "response_format": "pcm",
+                "stream": True,
                 "speed": self._speed,
-                "sample_rate": self._sample_rate,
-                "format": "pcm",
-                "streaming": True
+                "volume_multiplier": 1.0
             }
             
             # Stream audio
             async with self._client.stream(
                 "POST",
-                f"{self._base_url}/synthesize",
+                f"{self._base_url}/v1/audio/speech",
                 json=request_data
             ) as response:
                 response.raise_for_status()
                 
-                async for chunk in response.aiter_bytes(chunk_size=8192):
+                async for chunk in response.aiter_bytes(chunk_size=256):
                     if chunk:
                         # Create audio frame
                         frame = TTSAudioRawFrame(
@@ -73,8 +70,7 @@ class KokoroTTSService(TTSService):
                         )
                         yield frame
                         
-            # End TTS
-            yield SystemFrame("tts_stopped")
+            # End TTS (removed SystemFrame - not needed for basic TTS flow)
             
         except Exception as e:
             logger.error(f"Kokoro TTS error: {e}")

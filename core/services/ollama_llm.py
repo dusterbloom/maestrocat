@@ -5,14 +5,15 @@ import httpx
 from typing import AsyncGenerator, Optional, Dict, Any
 import logging
 
-from pipecat.frames.frames import Frame, TextFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame
+from pipecat.frames.frames import Frame, TextFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame, TranscriptionFrame
 from pipecat.services.ai_services import LLMService
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_response import LLMUserContextAggregator, LLMAssistantContextAggregator
 
 logger = logging.getLogger(__name__)
 
 
-class OllamaLLMService(LLMService):
+class OLLamaLLMService(LLMService):
     """
     Ollama integration for Pipecat
     Provides local LLM inference using Ollama
@@ -40,6 +41,25 @@ class OllamaLLMService(LLMService):
         
         self._client = httpx.AsyncClient(timeout=60.0)
         
+    def create_context_aggregator(self, context: OpenAILLMContext):
+        """Create context aggregators for user and assistant messages"""
+        
+        class ContextAggregatorPair:
+            def __init__(self, user_agg, assistant_agg):
+                self._user = user_agg
+                self._assistant = assistant_agg
+                
+            def user(self):
+                return self._user
+                
+            def assistant(self):
+                return self._assistant
+        
+        user_aggregator = LLMUserContextAggregator(context=context)
+        assistant_aggregator = LLMAssistantContextAggregator(context=context)
+        
+        return ContextAggregatorPair(user_aggregator, assistant_aggregator)
+        
     async def _generate_chat_completion(
         self,
         context: OpenAILLMContext
@@ -49,6 +69,9 @@ class OllamaLLMService(LLMService):
         try:
             # Prepare request
             messages = context.get_messages()
+            logger.info(f"🤖 Ollama starting generation with {len(messages)} messages")
+            if messages:
+                logger.info(f"🤖 Last message: {messages[-1]['content'][:100]}...")
             
             request_data = {
                 "model": self._model,
@@ -111,6 +134,22 @@ class OllamaLLMService(LLMService):
             logger.error(f"Ollama generation error: {e}")
             raise
             
+    async def process_frame(self, frame: Frame, direction):
+        """Debug frame processing"""
+        if isinstance(frame, TranscriptionFrame):
+            logger.info(f"🤖 LLM received transcription: '{frame.text}'")
+            logger.info(f"🤖 Calling parent process_frame...")
+        elif isinstance(frame, TextFrame):
+            logger.debug(f"🤖 LLM received text: '{frame.text[:50]}...'")
+        
+        # Call parent to handle the frame
+        result = await super().process_frame(frame, direction)
+        
+        if isinstance(frame, TranscriptionFrame):
+            logger.info(f"🤖 Parent process_frame completed")
+        
+        return result
+    
     async def stop(self):
         """Cleanup HTTP client"""
         await super().stop()

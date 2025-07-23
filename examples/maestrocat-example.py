@@ -26,7 +26,7 @@ from core.processors import (
 )
 from core.services import (
     WhisperLiveSTTService,
-    OllamaLLMService,
+    OLLamaLLMService,
     KokoroTTSService
 )
 from core.utils import MaestroCatConfig
@@ -95,7 +95,7 @@ class MaestroCatVoiceAgent:
         )
         
         # Create LLM service
-        llm = OllamaLLMService(
+        llm = OLLamaLLMService(
             base_url=self.config.llm.base_url,
             model=self.config.llm.model,
             temperature=self.config.llm.temperature,

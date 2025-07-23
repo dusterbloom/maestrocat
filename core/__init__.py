@@ -2,13 +2,13 @@
 
 from .services import (
     WhisperLiveSTTService,
-    OllamaLLMService,
+    OLLamaLLMService,
     KokoroTTSService,
 )
 
 __all__ = [
     "WhisperLiveSTTService",
-    "OllamaLLMService",
+    "OLLamaLLMService",
     "KokoroTTSService",
 ]
 
