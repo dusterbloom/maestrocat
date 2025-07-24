@@ -28,6 +28,8 @@ from pipecat.transports.network.fastapi_websocket import (
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.frames.frames import TranscriptionFrame, Frame
+from pipecat.processors.frame_processor import FrameProcessor
 # Use our custom Ollama service with the api_key bug fix
 from core.services.ollama_llm import OLLamaLLMService
 
@@ -49,6 +51,7 @@ from core.serializers import RawAudioSerializer
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+
 
 
 class MacOSMaestroCatAgent:

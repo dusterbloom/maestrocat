@@ -9,8 +9,9 @@ import logging
 import io
 import wave
 
-from pipecat.frames.frames import Frame, TTSAudioRawFrame, SystemFrame
+from pipecat.frames.frames import Frame, TTSAudioRawFrame, SystemFrame, TextFrame
 from pipecat.services.tts_service import TTSService
+from pipecat.processors.frame_processor import FrameDirection
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,7 @@ class KokoroTTSService(TTSService):
         self._audio_buffer = b""  # Buffer for accumulating audio chunks
         self._streaming_buffer = []  # Buffer for smooth audio streaming
         self._buffer_samples = int(self._sample_rate * 0.02)  # 20ms buffer for smoothing
+        
         
     def _resample_audio(self, audio_data: bytes, from_rate: int, to_rate: int) -> bytes:
         """Resample audio data from one sample rate to another"""
@@ -123,6 +125,7 @@ class KokoroTTSService(TTSService):
             
         return chunk.tobytes()
         
+
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text"""
         
@@ -135,15 +138,18 @@ class KokoroTTSService(TTSService):
                 except:
                     pass
             
-            # Prepare OpenAI-compatible request (PCM format for better streaming)
+            # Prepare OpenAI-compatible request with streaming enabled
             request_data = {
                 "model": "tts-1-hd",  # Use HD model for better quality
                 "input": text,
                 "voice": self._voice,
-                "response_format": "wav",  # Request WAV to get proper headers
-                "stream": True,
+                "response_format": "wav",  # WAV format with headers
+                "stream": True,  # Enable streaming
+                "continuous": True,  # Prevent pops between audio chunks
                 "speed": self._speed,
-                "volume_multiplier": 1.0
+                "volume_multiplier": 1.0,
+                "stream_strip_silence": False,  # Don't strip silence for better streaming
+                "normalize": True  # Normalize audio levels
             }
             
             # Stream audio
@@ -167,46 +173,34 @@ class KokoroTTSService(TTSService):
                         if chunk:
                             self._audio_buffer += chunk
                             
-                            # Try to parse WAV header from accumulated buffer
+                            # Parse WAV header once, then stream PCM data
                             if not wav_header_parsed and len(self._audio_buffer) > 44:
                                 try:
                                     pcm_data, kokoro_sample_rate = self._extract_wav_data(self._audio_buffer)
                                     wav_header_parsed = True
                                     
-                                    # Process the PCM data
+                                    # Stream the initial PCM data
                                     if pcm_data:
-                                        # No resampling needed - keep native 24kHz
                                         frame = TTSAudioRawFrame(
                                             audio=pcm_data,
-                                            sample_rate=kokoro_sample_rate,  # Use original rate
+                                            sample_rate=kokoro_sample_rate,
                                             num_channels=1
                                         )
                                         yield frame
                                         
-                                    # Clear buffer after processing complete WAV
                                     self._audio_buffer = b""
                                 except Exception as e:
-                                    # If WAV parsing fails, continue accumulating
                                     logger.debug(f"WAV parsing not ready yet: {e}")
                                     pass
                             
-                            # If we have a very large buffer but no WAV header, process as raw
-                            elif len(self._audio_buffer) > 8192 and not wav_header_parsed:
-                                logger.warning("Large buffer without WAV header, processing as raw PCM")
-                                # Assume it's raw PCM at Kokoro's rate
-                                if kokoro_sample_rate != self._sample_rate:
-                                    processed_audio = self._resample_audio(self._audio_buffer, kokoro_sample_rate, self._sample_rate)
-                                else:
-                                    processed_audio = self._audio_buffer
-                                
-                                # Simple direct output for now to restore audio
+                            # After header parsed, stream all chunks as PCM
+                            elif wav_header_parsed and self._audio_buffer:
                                 frame = TTSAudioRawFrame(
                                     audio=self._audio_buffer,
-                                    sample_rate=kokoro_sample_rate,  # Use original rate
+                                    sample_rate=kokoro_sample_rate,
                                     num_channels=1
                                 )
                                 yield frame
-                                    
                                 self._audio_buffer = b""
                     
                     # Process any remaining buffer data

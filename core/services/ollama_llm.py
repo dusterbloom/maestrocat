@@ -7,7 +7,7 @@ import logging
 
 from pipecat.frames.frames import Frame, TextFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame, TranscriptionFrame
 from pipecat.services.llm_service import LLMService
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext, OpenAILLMContextFrame
 from pipecat.processors.aggregators.llm_response import LLMUserContextAggregator, LLMAssistantContextAggregator
 
 logger = logging.getLogger(__name__)
@@ -70,6 +70,7 @@ class OLLamaLLMService(LLMService):
             # Prepare request
             messages = context.get_messages()
             logger.info(f"🤖 Ollama starting generation with {len(messages)} messages")
+            logger.info(f"🤖 Full context messages: {messages}")
             if messages:
                 logger.info(f"🤖 Last message: {messages[-1]['content'][:100]}...")
             
@@ -125,7 +126,8 @@ class OLLamaLLMService(LLMService):
                         
                 # Update context with response
                 if full_response:
-                    context.add_message("assistant", full_response)
+                    from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextMessage
+                    context.add_message(OpenAILLMContextMessage.create_assistant_message(full_response))
                     
             # End response
             yield LLMFullResponseEndFrame()
@@ -135,20 +137,34 @@ class OLLamaLLMService(LLMService):
             raise
             
     async def process_frame(self, frame: Frame, direction):
-        """Debug frame processing"""
-        if isinstance(frame, TranscriptionFrame):
-            logger.info(f"🤖 LLM received transcription: '{frame.text}'")
-            logger.info(f"🤖 Calling parent process_frame...")
-        elif isinstance(frame, TextFrame):
-            logger.debug(f"🤖 LLM received text: '{frame.text[:50]}...'")
+        """Process frames and handle OpenAILLMContextFrame for generation"""
         
-        # Call parent to handle the frame
-        result = await super().process_frame(frame, direction)
+        # Call parent first
+        await super().process_frame(frame, direction)
         
-        if isinstance(frame, TranscriptionFrame):
-            logger.info(f"🤖 Parent process_frame completed")
-        
-        return result
+        # Handle OpenAILLMContextFrame to trigger generation
+        if isinstance(frame, OpenAILLMContextFrame):
+            logger.info(f"🤖 LLM received OpenAILLMContextFrame - triggering generation!")
+            context = frame.context
+            logger.info(f"🤖 Context has {len(context.get_messages())} messages")
+            
+            try:
+                # Start the generation process
+                await self.push_frame(LLMFullResponseStartFrame(), direction)
+                
+                # Generate response
+                async for response_frame in self._generate_chat_completion(context):
+                    await self.push_frame(response_frame, direction)
+                    
+                # End the generation
+                await self.push_frame(LLMFullResponseEndFrame(), direction)
+                
+            except Exception as e:
+                logger.error(f"🤖 Generation failed: {e}")
+                raise
+        else:
+            # For other frames, just push them through
+            await self.push_frame(frame, direction)
     
     async def stop(self):
         """Cleanup HTTP client"""
