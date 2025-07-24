@@ -148,22 +148,39 @@ def check_dependencies(platform_type):
     """Check if required dependencies are available for the platform"""
     missing = []
     
-    # All platforms now use Docker for consistency
-    try:
-        result = subprocess.run(["docker", "--version"], capture_output=True, check=True)
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        missing.append("Docker (install from: https://docker.com)")
-    
-    try:
-        result = subprocess.run(["docker-compose", "--version"], capture_output=True, check=True)
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        missing.append("Docker Compose (install with: pip install docker-compose)")
-    
-    # Check if Docker daemon is running
-    try:
-        result = subprocess.run(["docker", "ps"], capture_output=True, check=True)
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        missing.append("Docker daemon not running (start Docker Desktop or run: sudo systemctl start docker)")
+    if platform_type == "macos":
+        # macOS uses native services, check for native dependencies
+        try:
+            result = subprocess.run(["ollama", "--version"], capture_output=True, check=True)
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            missing.append("Ollama (install with: brew install ollama)")
+        
+        try:
+            result = subprocess.run(["whisper-cpp", "--help"], capture_output=True, check=True)
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            missing.append("Whisper.cpp (install with: brew install whisper-cpp)")
+        
+        try:
+            result = subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            missing.append("FFmpeg (install with: brew install ffmpeg)")
+    else:
+        # Linux/WSL/Windows use Docker services
+        try:
+            result = subprocess.run(["docker", "--version"], capture_output=True, check=True)
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            missing.append("Docker (install from: https://docker.com)")
+        
+        try:
+            result = subprocess.run(["docker-compose", "--version"], capture_output=True, check=True)
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            missing.append("Docker Compose (install with: pip install docker-compose)")
+        
+        # Check if Docker daemon is running
+        try:
+            result = subprocess.run(["docker", "ps"], capture_output=True, check=True)
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            missing.append("Docker daemon not running (start Docker Desktop or run: sudo systemctl start docker)")
     
     return missing
 
@@ -181,7 +198,7 @@ def print_platform_info(platform_type, config_file, example_file):
     
     if platform_type == "macos":
         print("🍎 Detected: macOS (Apple Silicon optimized)")
-        print("🚀 Using: Native services (Whisper.cpp + Ollama + macOS TTS)")
+        print("🚀 Using: Native services (Whisper.cpp + Ollama + Kokoro-onnx )")
         print("⚡ Performance: Metal acceleration enabled")
     elif platform_type == "wsl":
         print("🐧 Detected: Windows Subsystem for Linux")
@@ -257,20 +274,21 @@ async def main():
     print("✅ All dependencies available!")
     print("")
     
-    # Start all Docker services for consistency across platforms
-    print("🔧 Starting Docker services...")
-    if not start_docker_services(platform_type):
-        print("❗ Warning: Could not start Docker services. Please check Docker installation.")
+    # Start Docker services only for non-macos platforms
+    if platform_type != "macos":
+        print("🔧 Starting Docker services...")
+        if not start_docker_services(platform_type):
+            print("❗ Warning: Could not start Docker services. Please check Docker installation.")
     
     print("")
     print("🚀 Starting MaestroCat...")
     print(f"💻 Platform: {platform_type}")
     
-    # All platforms now use Docker for consistency
+    # Platform-specific service information
     if platform_type == "macos":
         print("🎤 STT: Native Whisper.cpp (Apple Silicon optimized)")
-        print("🧠 LLM: Ollama (Docker, CPU-optimized)")  
-        print("🗣️  TTS: Kokoro (Docker, CPU-optimized)")
+        print("🧠 LLM: Native Ollama (Apple Silicon optimized)")
+        print("🗣️  TTS: Native macOS TTS")
     elif check_gpu_availability():
         print("🎤 STT: WhisperLive (Docker, GPU-accelerated)")
         print("🧠 LLM: Ollama (Docker, GPU-accelerated)")
@@ -380,6 +398,10 @@ Platform Detection:
         return 0
         
     if args.start_docker:
+        if platform_type == "macos":
+            print("❌ Docker services are not used on macOS - native services are used instead")
+            return 1
+        
         print("🔧 Starting Docker services with Debug UI...")
         if start_docker_services(platform_type):
             print("✅ Docker services started successfully!")
