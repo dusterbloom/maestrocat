@@ -1,0 +1,40 @@
+# docker-compose.gpu.yml
+# GPU-enabled override for Linux/WSL systems with NVIDIA GPUs
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up kokoro -d
+
+services:
+  kokoro:
+    image: ghcr.io/remsky/kokoro-fastapi-gpu:latest
+    environment:
+      - DEVICE=cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # Also enable GPU for Ollama on Linux/WSL if needed
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # GPU-enabled WhisperLive
+  whisperlive:
+    image: ghcr.io/collabora/whisperlive-gpu:latest
+    environment:
+      - WHISPER_DEVICE=cuda
+      - WHISPER_OMP_THREADS=4
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

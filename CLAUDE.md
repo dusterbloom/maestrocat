@@ -45,31 +45,72 @@ ollama pull llama3.2:3b
 
 ### Running Services
 
-#### Docker Services (Linux/Windows)
-```bash
-# Start all Docker services (WhisperLive, Ollama, Kokoro TTS)
-docker-compose up -d
+MaestroCat automatically detects your platform and starts the appropriate services when you run `python maestrocat.py`.
 
-# Check service health
+#### Automatic Platform Detection
+```bash
+# Universal launcher - detects platform and starts appropriate services
+python maestrocat.py
+
+# Check dependencies only  
+python maestrocat.py --check-only
+
+# Force specific platform
+python maestrocat.py --platform macos
+python maestrocat.py --platform linux
+```
+
+#### Manual Service Management
+
+**Linux/WSL (GPU-enabled)**:
+```bash
+# Start GPU-accelerated services
+docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+
+# Start just Kokoro TTS with GPU
+docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up kokoro -d
+```
+
+**macOS or CPU-only systems**:
+```bash
+# Start CPU-only services  
+docker-compose -f docker-compose.yml -f docker-compose.cpu.yml up -d
+
+# Start just Kokoro TTS (CPU)
+docker-compose -f docker-compose.yml -f docker-compose.cpu.yml up kokoro -d
+
+# Native Ollama (macOS)
+ollama serve
+```
+
+#### Manual Docker Image Management
+
+**Pull Kokoro images manually (optional)**:
+```bash
+# For macOS or CPU-only systems
+docker pull ghcr.io/remsky/kokoro-fastapi-cpu:latest
+
+# For Linux/WSL with GPU
+docker pull ghcr.io/remsky/kokoro-fastapi-gpu:latest
+
+# Check downloaded images
+docker images | grep kokoro
+```
+
+#### Service Health Checks
+```bash
+# Check all services
 docker-compose ps
 
 # View service logs
-docker-compose logs <service_name>  # e.g., whisperlive, ollama, kokoro
-```
+docker-compose logs kokoro
+docker-compose logs ollama
 
-#### Native macOS Services
-```bash
-# Start Ollama server (if not already running)
-ollama serve
+# Check Kokoro TTS web UI
+open http://localhost:5000/web
 
-# Check Ollama is running
+# Test Ollama API
 curl http://localhost:11434/api/version
-
-# Verify Whisper.cpp installation
-whisper --help
-
-# Check available macOS voices
-say -v ?
 ```
 
 ### Running the Application

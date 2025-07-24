@@ -1,0 +1,35 @@
+# docker-compose.cpu.yml
+# CPU-only override for macOS and systems without GPU support
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.cpu.yml up -d
+
+services:
+  kokoro:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+    environment:
+      - DEVICE=cpu
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
+
+  # CPU-only Ollama for macOS (no GPU requirements)
+  ollama:
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 8G
+        reservations:
+          cpus: '2.0'
+          memory: 4G
+
+  # WhisperLive overridden to use a dummy image that won't be pulled
+  whisperlive:
+    image: alpine:latest
+    command: "echo 'WhisperLive disabled for macOS - using native Whisper.cpp instead'"
+    deploy:
+      replicas: 0

@@ -7,31 +7,33 @@ vad:
   min_speech_ms: 250
   pause_ms: 800
 
-# Pipecat MLX Whisper STT (optimized for Apple Silicon)
+# WhisperLive STT (Docker, CPU-optimized for macOS)
 stt:
-  service: "mlx-whisper"  # Uses Pipecat's WhisperSTTServiceMLX
-  model_size: "medium"    # Options: "tiny", "medium", "large-v3", "large-v3-turbo", "distil-large-v3"
+  service: "whisperlive"  # Uses Docker WhisperLive service
+  host: "localhost"
+  port: 9090
+  model_size: "medium"    # Options: "tiny", "small", "medium", "large"
   language: "en"          # Language code or "auto" for detection
-  translate: false
+  translate: false  
   sample_rate: 16000
 
-# Native Ollama LLM (no Docker needed - runs natively on macOS)
+# Docker Ollama LLM (CPU-optimized for macOS consistency)
 llm:
-  base_url: "http://localhost:11434"  # Native Ollama, not Docker
-  model: "llama3.2:3b"               # Recommended for Apple Silicon
+  base_url: "http://localhost:11434"  # Docker Ollama service
+  model: "llama3.2:3b"               # Recommended model
   temperature: 0.7
   max_tokens: 1000
   top_p: 0.9
   top_k: 40
-  system_prompt: "You are MaestroCat, a helpful AI voice assistant running natively on macOS. Keep responses concise and conversational. If interrupted, acknowledge it naturally."
+  system_prompt: "You are MaestroCat, a helpful AI voice assistant. Keep responses concise and conversational. If interrupted, acknowledge it naturally."
 
-# Native macOS TTS (instead of Kokoro Docker)
+# Kokoro TTS (Docker) - preferred for streaming
 tts:
-  service: "macos"       # Options: "macos", "pyttsx3", "kokoro"
-  voice: "Samantha"      # macOS voice name (Samantha, Alex, Victoria, etc.)
-  rate: 200              # Words per minute
-  volume: 0.8            # 0.0 to 1.0
-  sample_rate: 22050     # macOS default for speech
+  service: "kokoro"      # Options: "macos", "pyttsx3", "kokoro"
+  base_url: "http://localhost:5001"
+  voice: "af_bella"      # Kokoro voice options
+  speed: 1.0
+  sample_rate: 24000     # Kokoro's native sample rate
 
 # Alternative TTS configurations
 tts_alternatives:
@@ -54,7 +56,7 @@ tts_alternatives:
   # Kokoro TTS (if Docker is available)
   kokoro:
     service: "kokoro"
-    base_url: "http://localhost:5000"
+    base_url: "http://localhost:5001"
     voice: "af_bella"
     speed: 1.0
     sample_rate: 24000

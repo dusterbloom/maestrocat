@@ -30,54 +30,140 @@ def detect_platform():
     else:
         return "unknown"
 
+def check_gpu_availability():
+    """Check if NVIDIA GPU is available for Docker"""
+    try:
+        result = subprocess.run(["nvidia-smi"], capture_output=True, check=True)
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+
+def pull_docker_images(platform_type):
+    """Pull the appropriate Docker images based on platform"""
+    images_to_pull = []
+    
+    if platform_type == "macos":
+        # Skip WhisperLive on macOS since it doesn't support ARM64
+        # macOS users should use native Whisper.cpp instead
+        images_to_pull = [
+            ("ghcr.io/remsky/kokoro-fastapi-cpu:latest", "Kokoro TTS CPU"),
+            ("ollama/ollama:latest", "Ollama LLM")
+        ]
+        print("📥 Pulling ARM64-compatible images for macOS...")
+        print("⚠️  Note: WhisperLive skipped (no ARM64 support). Use native Whisper.cpp instead.")
+    else:
+        # Linux/WSL - check for GPU
+        if check_gpu_availability():
+            images_to_pull = [
+                ("ghcr.io/collabora/whisperlive-gpu:latest", "WhisperLive GPU"),
+                ("ghcr.io/remsky/kokoro-fastapi-gpu:latest", "Kokoro TTS GPU"),
+                ("ollama/ollama:latest", "Ollama LLM")
+            ]
+            print("📥 Pulling GPU-accelerated images...")
+        else:
+            images_to_pull = [
+                ("ghcr.io/collabora/whisperlive-cpu:latest", "WhisperLive CPU"),
+                ("ghcr.io/remsky/kokoro-fastapi-cpu:latest", "Kokoro TTS CPU"),
+                ("ollama/ollama:latest", "Ollama LLM")
+            ]
+            print("📥 Pulling CPU-only images...")
+    
+    for image, name in images_to_pull:
+        try:
+            # Check if image already exists
+            result = subprocess.run(
+                ["docker", "images", "-q", image], 
+                capture_output=True, text=True
+            )
+            if result.stdout.strip():
+                print(f"✅ {name} image already available")
+                continue
+            
+            # Pull the image
+            print(f"⬇️  Downloading {name}: {image}")
+            result = subprocess.run(
+                ["docker", "pull", image], 
+                capture_output=True, text=True
+            )
+            if result.returncode == 0:
+                print(f"✅ {name} downloaded successfully")
+            else:
+                print(f"❌ Failed to pull {name}: {result.stderr}")
+                return False
+        except Exception as e:
+            print(f"❌ Error pulling {name}: {e}")
+            return False
+    
+    return True
+
+def start_docker_services(platform_type):
+    """Start all Docker services based on platform"""
+    # First, ensure we have all required images
+    if not pull_docker_images(platform_type):
+        print("❌ Could not download required images")
+        return False
+    
+    if platform_type == "macos":
+        print("🍎 Starting macOS-specific Docker services...")
+        print("📦 Services: Ollama + Kokoro (CPU-optimized, WhisperLive excluded)")
+        cmd = ["docker-compose", "-f", "docker-compose.macos.yml", "up", "-d"]
+    else:
+        # Linux/WSL - check for GPU
+        if check_gpu_availability():
+            print("🚀 Starting GPU-accelerated Docker services for Linux/WSL...")
+            print("📦 Services: WhisperLive + Ollama + Kokoro (all GPU-accelerated)")
+            cmd = ["docker-compose", "-f", "docker-compose.yml", "-f", "docker-compose.gpu.yml", "up", "-d"]
+        else:
+            print("💻 Starting CPU-only Docker services for Linux/WSL...")
+            print("📦 Services: WhisperLive + Ollama + Kokoro (all CPU-only)")
+            cmd = ["docker-compose", "-f", "docker-compose.yml", "-f", "docker-compose.cpu.yml", "up", "-d"]
+    
+    try:
+        print(f"🔄 Running: {' '.join(cmd)}")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            print("✅ Docker services started successfully")
+            if platform_type != "macos":
+                print("🔊 WhisperLive STT: ws://localhost:9090")
+            print("🧠 Ollama LLM: http://localhost:11434")
+            if platform_type == "macos":
+                print("🗣️  Kokoro TTS: http://localhost:5001")
+                print("🌐 Kokoro Web UI: http://localhost:5001/web")
+            else:
+                print("🗣️  Kokoro TTS: http://localhost:5000")
+                print("🌐 Kokoro Web UI: http://localhost:5000/web")
+            return True
+        else:
+            print(f"❌ Failed to start Docker services (exit code {result.returncode})")
+            if result.stderr:
+                print(f"STDERR: {result.stderr}")
+            if result.stdout:
+                print(f"STDOUT: {result.stdout}")
+            return False
+    except Exception as e:
+        print(f"❌ Error starting Docker services: {e}")
+        return False
+
 def check_dependencies(platform_type):
     """Check if required dependencies are available for the platform"""
     missing = []
     
-    if platform_type == "macos":
-        # Check native macOS dependencies
-        try:
-            # Check Ollama
-            result = subprocess.run(
-                ["curl", "-s", "http://localhost:11434/api/version"], 
-                capture_output=True, 
-                timeout=2
-            )
-            if result.returncode != 0:
-                missing.append("Ollama not running (start with: ollama serve)")
-        except:
-            missing.append("Ollama not available (install with: brew install ollama)")
-        
-        # Check Whisper.cpp (try multiple binary names, whisper-cli is the new name)
-        whisper_found = False
-        for whisper_cmd in ["whisper-cli", "whisper-cpp", "whisper"]:
-            try:
-                subprocess.run([whisper_cmd, "--help"], capture_output=True, check=True)
-                whisper_found = True
-                break
-            except (subprocess.CalledProcessError, FileNotFoundError):
-                continue
-        
-        if not whisper_found:
-            missing.append("whisper.cpp (install with: brew install whisper-cpp)")
-        
-        # Check macOS say command (just check if it exists, no --help)
-        try:
-            subprocess.run(["which", "say"], capture_output=True, check=True)
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            missing.append("macOS 'say' command not available")
-            
-    else:
-        # Check Docker dependencies for Linux/WSL/Windows
-        try:
-            result = subprocess.run(["docker", "--version"], capture_output=True, check=True)
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            missing.append("Docker (install from: https://docker.com)")
-        
-        try:
-            result = subprocess.run(["docker-compose", "--version"], capture_output=True, check=True)
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            missing.append("Docker Compose (install with: pip install docker-compose)")
+    # All platforms now use Docker for consistency
+    try:
+        result = subprocess.run(["docker", "--version"], capture_output=True, check=True)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        missing.append("Docker (install from: https://docker.com)")
+    
+    try:
+        result = subprocess.run(["docker-compose", "--version"], capture_output=True, check=True)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        missing.append("Docker Compose (install with: pip install docker-compose)")
+    
+    # Check if Docker daemon is running
+    try:
+        result = subprocess.run(["docker", "ps"], capture_output=True, check=True)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        missing.append("Docker daemon not running (start Docker Desktop or run: sudo systemctl start docker)")
     
     return missing
 
@@ -170,21 +256,32 @@ async def main():
     
     print("✅ All dependencies available!")
     print("")
+    
+    # Start all Docker services for consistency across platforms
+    print("🔧 Starting Docker services...")
+    if not start_docker_services(platform_type):
+        print("❗ Warning: Could not start Docker services. Please check Docker installation.")
+    
+    print("")
     print("🚀 Starting MaestroCat...")
     print(f"💻 Platform: {platform_type}")
     
+    # All platforms now use Docker for consistency
     if platform_type == "macos":
-        print("🎤 STT: Whisper.cpp (native)")
-        print("🧠 LLM: Ollama (native)")
-        print("🗣️  TTS: macOS System (native)")
-        print("🌐 WebSocket: http://localhost:8765/ws")
-        print("🐛 Debug UI: http://localhost:8080")
+        print("🎤 STT: Native Whisper.cpp (Apple Silicon optimized)")
+        print("🧠 LLM: Ollama (Docker, CPU-optimized)")  
+        print("🗣️  TTS: Kokoro (Docker, CPU-optimized)")
+    elif check_gpu_availability():
+        print("🎤 STT: WhisperLive (Docker, GPU-accelerated)")
+        print("🧠 LLM: Ollama (Docker, GPU-accelerated)")
+        print("🗣️  TTS: Kokoro (Docker, GPU-accelerated)")
     else:
-        print("🎤 STT: WhisperLive (Docker)")
-        print("🧠 LLM: Ollama (Docker)")
-        print("🗣️  TTS: Kokoro (Docker)")
-        print("🌐 WebSocket: http://localhost:8765/ws")
-        print("🐛 Debug UI: http://localhost:8080")
+        print("🎤 STT: WhisperLive (Docker, CPU-only)")
+        print("🧠 LLM: Ollama (Docker, CPU-only)")
+        print("🗣️  TTS: Kokoro (Docker, CPU-only)")
+        
+    print("🌐 WebSocket: http://localhost:8765/ws")
+    print("🐛 Debug UI: http://localhost:8080")
     
     print("")
     print("Press Ctrl+C to stop")
@@ -248,6 +345,12 @@ Platform Detection:
         help="Only check dependencies, don't start the agent"
     )
     
+    parser.add_argument(
+        "--start-docker",
+        action="store_true",
+        help="Only start Docker services, don't run the agent"
+    )
+    
     args = parser.parse_args()
     
     # Override platform detection if specified
@@ -275,6 +378,32 @@ Platform Detection:
     if args.check_only:
         print("✅ All dependencies available!")
         return 0
+        
+    if args.start_docker:
+        print("🔧 Starting Docker services with Debug UI...")
+        if start_docker_services(platform_type):
+            print("✅ Docker services started successfully!")
+            print("🔍 Check status with: docker-compose ps")
+            print("")
+            
+            # Start debug UI server
+            from core.apps.debug_ui import DebugUIServer
+            debug_port = 8080
+            print(f"🐛 Starting Debug UI on http://localhost:{debug_port}")
+            print("💡 Debug UI will show live data when MaestroCat agent connects")
+            print("🔄 Leave this running and start the agent in another terminal")
+            print("")
+            print("Press Ctrl+C to stop")
+            
+            try:
+                server = DebugUIServer(port=debug_port)
+                return asyncio.run(server.start())
+            except KeyboardInterrupt:
+                print("\n👋 Debug UI shutting down...")
+                return 0
+        else:
+            print("❌ Failed to start Docker services")
+            return 1
     
     # Run the agent
     return asyncio.run(main())

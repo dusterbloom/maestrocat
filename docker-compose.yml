@@ -2,28 +2,22 @@
 services:
   # WhisperLive STT Server
   whisperlive:
-    image: ghcr.io/collabora/whisperlive-gpu:latest
+    image: ${WHISPERLIVE_IMAGE:-ghcr.io/collabora/whisperlive-cpu:latest}
     container_name: whisperlive
     ports:
       - "9090:9090"
     volumes:
       - whisper_models:/root/.cache/whisper
     environment:
-      - OMP_NUM_THREADS=4
+      - OMP_NUM_THREADS=${WHISPER_OMP_THREADS:-4}
+      - WHISPER_DEVICE=${WHISPER_DEVICE:-cpu}
     command: >
       python3 run_server.py 
       --port 9090 
       --backend faster_whisper
-      --omp_num_threads 4
+      --omp_num_threads ${WHISPER_OMP_THREADS:-4}
     networks:
       - maestrocat-network
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
     healthcheck:
       test: ["CMD", "python", "-c", "import websockets; import asyncio; asyncio.run(websockets.connect('ws://localhost:9090'))"]
       interval: 30s
@@ -31,7 +25,7 @@ services:
       retries: 3
 
   kokoro:
-    image: ghcr.io/remsky/kokoro-fastapi-gpu:latest   # Replace with actual image
+    image: ${KOKORO_IMAGE:-ghcr.io/remsky/kokoro-fastapi-cpu:latest}
     container_name: kokoro
     ports:
       - "5000:8880"
@@ -40,16 +34,9 @@ services:
     environment:
       - MODEL_PATH=/models
       - DEFAULT_VOICE=af_bella
-      - DEVICE=cuda  # or cuda if GPU available
+      - DEVICE=${KOKORO_DEVICE:-cpu}
     networks:
       - maestrocat-network
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8880/health"]
       interval: 30s
@@ -93,7 +80,7 @@ volumes:
   whisper_models:
   kokoro_models:
   ollama_data:
-    external:
-      name: ollama
+    name: ollama
+    external: true
   redis_data:
   prometheus_data:

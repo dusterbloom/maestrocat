@@ -139,14 +139,15 @@ class MacOSMaestroCatAgent:
         # Create LLM service (native Ollama)
         llm_config = self.config.llm
         base_url = llm_config.base_url
-        if not base_url.endswith('/v1'):
-            base_url += '/v1'
             
         logger.info(f"Using native Ollama LLM: {llm_config.model}")
         self.llm = OLLamaLLMService(
             model=llm_config.model,
             base_url=base_url,
-            api_key="ollama"  # Required by Pipecat but not used by Ollama
+            temperature=llm_config.temperature,
+            max_tokens=llm_config.max_tokens,
+            top_p=llm_config.top_p,
+            top_k=llm_config.top_k
         )
         
         # Create TTS service
