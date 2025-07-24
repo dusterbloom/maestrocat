@@ -1,7 +1,7 @@
 # Core dependencies
 pipecat-ai[silero,websockets,openai,ollama]>=0.0.76
 websockets>=11.0
-httpx>=0.25.0
+httpx[http2]>=0.25.0
 pydantic>=2.0.0
 pyyaml>=6.0
 numpy>=1.24.0

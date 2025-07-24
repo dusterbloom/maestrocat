@@ -4,15 +4,15 @@
 
 vad:
   energy_threshold: 0.5
-  min_speech_ms: 250
-  pause_ms: 800
+  min_speech_ms: 150     # Faster speech detection
+  pause_ms: 500          # Shorter pause for faster response
 
 # WhisperLive STT (Docker, CPU-optimized for macOS)
 stt:
   service: "whisperlive"  # Uses Docker WhisperLive service
   host: "localhost"
   port: 9090
-  model_size: "medium"    # Options: "tiny", "small", "medium", "large"
+  model_size: "base"      # Use base for good accuracy/speed balance
   language: "en"          # Language code or "auto" for detection
   translate: false  
   sample_rate: 16000
@@ -20,18 +20,18 @@ stt:
 # Docker Ollama LLM (CPU-optimized for macOS consistency)
 llm:
   base_url: "http://localhost:11434"  # Docker Ollama service
-  model: "llama3.2:3b"               # Recommended model
+  model: "llama3.2:1b"               # Fastest model for sub-second response
   temperature: 0.7
-  max_tokens: 1000
+  max_tokens: 150                    # Reduced for faster generation
   top_p: 0.9
   top_k: 40
-  system_prompt: "You are MaestroCat, a helpful AI voice assistant. Keep responses concise and conversational. If interrupted, acknowledge it naturally."
+  system_prompt: "You are MaestroCat, a helpful AI voice assistant. Keep responses very brief and conversational. If interrupted, acknowledge it naturally."
 
-# Kokoro TTS (Docker) - preferred for streaming
+# Native Kokoro ONNX TTS - preferred for streaming with Apple Silicon acceleration
 tts:
-  service: "kokoro"      # Options: "macos", "pyttsx3", "kokoro"
-  base_url: "http://localhost:5001"
-  voice: "af_bella"      # Kokoro voice options
+  service: "native_kokoro"    # Options: "macos", "pyttsx3", "kokoro", "native_kokoro"  
+  # Native Kokoro settings (Apple Silicon optimized)
+  voice: "af_bella"           # Available voices: af, af_bella, af_nicole, af_sarah, af_sky, am_adam, am_michael, bf_emma, bf_isabella, bm_george, bm_lewis
   speed: 1.0
   sample_rate: 24000     # Kokoro's native sample rate
 
@@ -79,7 +79,7 @@ macos:
   audio:
     input_device: null     # null = use default microphone
     output_device: null    # null = use default speakers
-    buffer_size: 1024      # Audio buffer size
+    buffer_size: 512       # Smaller buffer for lower latency
     
   # Performance settings for Apple Silicon
   performance:

@@ -20,7 +20,7 @@ import uvicorn
 # Pipecat imports
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.task import PipelineTask, PipelineParams
 from pipecat.transports.network.fastapi_websocket import (
     FastAPIWebsocketParams,
     FastAPIWebsocketTransport,
@@ -132,7 +132,7 @@ class MacOSMaestroCatAgent:
             "distil-large-v3": MLXModel.DISTIL_LARGE_V3
         }
         
-        model = model_mapping.get(stt_config.model_size, MLXModel.MEDIUM)
+        model = model_mapping.get(stt_config.model_size, MLXModel.TINY)  # Default to TINY for speed
         
         self.stt = WhisperSTTServiceMLX(
             model=model,
@@ -173,15 +173,32 @@ class MacOSMaestroCatAgent:
                 volume=tts_config.volume,
                 sample_rate=tts_config.sample_rate
             )
+        elif tts_service == 'native_kokoro':
+            # Use native Kokoro ONNX TTS for 5-10x performance improvement over Docker
+            from core.services.native_kokoro_tts import NativeKokoroTTSService
+            logger.info(f"Using Native Kokoro ONNX TTS service (Apple Silicon optimized) with voice: {tts_config.voice}")
+            try:
+                self.tts = NativeKokoroTTSService(
+                    voice=tts_config.voice,
+                    speed=tts_config.speed,
+                    sample_rate=tts_config.sample_rate
+                )
+            except Exception as e:
+                logger.warning(f"Failed to initialize Native Kokoro, falling back to macOS TTS: {e}")
+                self.tts = MacOSTTSService(
+                    voice="Samantha",
+                    rate=180,
+                    volume=0.9,
+                    sample_rate=22050
+                )
         else:
-            # Fallback to Kokoro if available
-            from core.services import KokoroTTSService
-            logger.info("Using Kokoro TTS service")
-            self.tts = KokoroTTSService(
-                base_url=tts_config.base_url,
-                voice=tts_config.voice,
-                speed=tts_config.speed,
-                sample_rate=tts_config.sample_rate
+            # Default fallback to macOS System TTS
+            logger.info(f"Unknown TTS service '{tts_service}', falling back to macOS System TTS")
+            self.tts = MacOSTTSService(
+                voice="Samantha",
+                rate=180,
+                volume=0.9,
+                sample_rate=22050
             )
         
         # Create interruption handler
@@ -189,6 +206,10 @@ class MacOSMaestroCatAgent:
             threshold=self.config.interruption.threshold,
             ack_delay=self.config.interruption.ack_delay
         )
+        
+        # Pre-load model for faster first response
+        if hasattr(self.llm, '_preload_model'):
+            await self.llm._preload_model()
         
     async def _load_modules(self):
         """Load configured modules"""
@@ -255,7 +276,14 @@ class MacOSMaestroCatAgent:
         await websocket.accept()
         
         pipeline, transport = await self.create_pipeline(websocket)
-        task = PipelineTask(pipeline)
+        task = PipelineTask(
+            pipeline,
+            params=PipelineParams(
+                allow_interruptions=True,  # Enable interruptions
+                enable_metrics=True,       # Enable performance metrics
+                enable_usage_metrics=True  # Enable usage tracking
+            )
+        )
         runner = PipelineRunner()
         
         logger.info(f"WebSocket connected: {websocket.client}")
