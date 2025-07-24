@@ -79,10 +79,10 @@ pipeline = Pipeline([
 
 ```bash
 # With Daily transport
-python examples/maestrocat_voice_agent.py
+python examples/local_maestrocat_agent.py
 
 # With WebSocket transport
-python examples/maestrocat_voice_agent.py --websocket
+python examples/local_maestrocat_agent.py --websocket
 
 # Access debug UI
 open http://localhost:8080
