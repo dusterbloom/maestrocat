@@ -232,7 +232,6 @@ MIT License - See LICENSE file
 
 - Built on top of [Pipecat](https://github.com/pipecat-ai/pipecat)
 - Uses [WhisperLive](https://github.com/collabora/WhisperLive) for STT
-- Powered by [Ollama](https://ollama.ai) for local LLMs
 
 ## Links
 

@@ -73,13 +73,13 @@ docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up kokoro -d
 
 **macOS or CPU-only systems**:
 ```bash
-# Start CPU-only services  
+# Start CPU-only services (Kokoro TTS) 
 docker-compose -f docker-compose.yml -f docker-compose.cpu.yml up -d
 
 # Start just Kokoro TTS (CPU)
 docker-compose -f docker-compose.yml -f docker-compose.cpu.yml up kokoro -d
 
-# Native Ollama (macOS)
+# Native Ollama (macOS) - Recommended
 ollama serve
 ```
 
@@ -104,7 +104,6 @@ docker-compose ps
 
 # View service logs
 docker-compose logs kokoro
-docker-compose logs ollama
 
 # Check Kokoro TTS web UI
 open http://localhost:5000/web
@@ -232,7 +231,6 @@ The `InterruptionHandler` uses a threshold system (default 0.2 = 20%) to determi
 
 #### Docker Services
 - WhisperLive: WebSocket connection on port 9090
-- Ollama: HTTP API on port 11434  
 - Kokoro: HTTP API on port 5000 (mapped from 8880 in container)
 
 #### Native macOS Services
@@ -262,7 +260,6 @@ Modules inherit from `MaestroCatModule` and implement:
 
 - **whisperlive**: GPU-accelerated real-time STT (faster_whisper backend)
 - **kokoro**: GPU-accelerated TTS with multiple voices
-- **ollama**: Local LLM inference (manages model downloads)
 - **redis**: Optional distributed event bus (port 6379)
 
 All services use the `maestrocat-network` Docker network for inter-service communication.

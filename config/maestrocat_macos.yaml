@@ -17,10 +17,10 @@ stt:
   translate: false  
   sample_rate: 16000
 
-# Docker Ollama LLM (CPU-optimized for macOS consistency)
+# Native Ollama LLM
 llm:
-  base_url: "http://localhost:11434"  # Docker Ollama service
-  model: "llama3.2:1b"               # Fastest model for sub-second response
+  base_url: "http://localhost:11434"  # Local Ollama service (install with 'brew install ollama')
+  model: "llama3.2:3b"               # Fastest model for sub-second response
   temperature: 0.7
   max_tokens: 150                    # Reduced for faster generation
   top_p: 0.9
