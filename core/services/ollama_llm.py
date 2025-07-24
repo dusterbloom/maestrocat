@@ -6,7 +6,7 @@ from typing import AsyncGenerator, Optional, Dict, Any
 import logging
 
 from pipecat.frames.frames import Frame, TextFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame, TranscriptionFrame
-from pipecat.services.ai_services import LLMService
+from pipecat.services.llm_service import LLMService
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.aggregators.llm_response import LLMUserContextAggregator, LLMAssistantContextAggregator
 

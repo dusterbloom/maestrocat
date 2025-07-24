@@ -21,6 +21,12 @@ class STTConfig:
     translate: bool = False
     model: str = "small"
     use_vad: bool = True
+    # macOS native service options
+    service: str = "whisperlive"  # "whisperlive" or "whispercpp"
+    model_size: str = "base"      # For whisper.cpp
+    model_path: Optional[str] = None  # Custom model path
+    sample_rate: int = 16000      # Audio sample rate
+    vad_threshold: float = 0.5    # VAD threshold for whisper.cpp
     
 
 @dataclass
@@ -40,6 +46,11 @@ class TTSConfig:
     voice: str = "af_bella"
     speed: float = 1.0
     sample_rate: int = 24000
+    # macOS native service options
+    service: str = "kokoro"       # "kokoro", "macos", "pyttsx3"
+    rate: int = 200              # Words per minute for macOS TTS
+    volume: float = 0.8          # Volume for macOS TTS
+    voice_id: Optional[str] = None  # For PyTTSx3
     
 
 @dataclass
@@ -58,6 +69,11 @@ class MaestroCatConfig:
         self.tts = TTSConfig(**config_dict.get("tts", {}))
         self.interruption = InterruptionConfig(**config_dict.get("interruption", {}))
         self.modules = config_dict.get("modules", {})
+        
+        # Additional macOS-specific sections
+        self.macos = config_dict.get("macos", {})
+        self.development = config_dict.get("development", {})
+        self.production = config_dict.get("production", {})
         
     @classmethod
     def from_file(cls, file_path: str) -> "MaestroCatConfig":
@@ -84,3 +100,48 @@ class MaestroCatConfig:
             }
         }
         return cls(config_dict)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert configuration to dictionary"""
+        return {
+            "vad": {
+                "energy_threshold": self.vad.energy_threshold,
+                "min_speech_ms": self.vad.min_speech_ms,
+                "pause_ms": self.vad.pause_ms
+            },
+            "stt": {
+                "host": self.stt.host,
+                "port": self.stt.port,
+                "language": self.stt.language,
+                "translate": self.stt.translate,
+                "model": self.stt.model,
+                "use_vad": self.stt.use_vad,
+                "service": self.stt.service,
+                "model_size": self.stt.model_size,
+                "sample_rate": self.stt.sample_rate
+            },
+            "llm": {
+                "base_url": self.llm.base_url,
+                "model": self.llm.model,
+                "temperature": self.llm.temperature,
+                "max_tokens": self.llm.max_tokens,
+                "system_prompt": self.llm.system_prompt
+            },
+            "tts": {
+                "base_url": self.tts.base_url,
+                "voice": self.tts.voice,
+                "speed": self.tts.speed,
+                "sample_rate": self.tts.sample_rate,
+                "service": self.tts.service,
+                "rate": self.tts.rate,
+                "volume": self.tts.volume
+            },
+            "interruption": {
+                "threshold": self.interruption.threshold,
+                "ack_delay": self.interruption.ack_delay
+            },
+            "modules": self.modules,
+            "macos": self.macos,
+            "development": self.development,
+            "production": self.production
+        }

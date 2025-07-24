@@ -1,0 +1,118 @@
+# config/maestrocat_macos.yaml
+# MaestroCat Configuration for macOS (Apple Silicon)
+# Uses native macOS services instead of Docker containers
+
+vad:
+  energy_threshold: 0.5
+  min_speech_ms: 250
+  pause_ms: 800
+
+# Native Whisper.cpp STT (instead of WhisperLive Docker)
+stt:
+  service: "whispercpp"  # Options: "whispercpp", "whisperlive" 
+  model_size: "base"     # Options: "tiny", "base", "small", "medium", "large"
+  model_path: null       # Auto-download to ~/.cache/whisper if null
+  language: "en"
+  translate: false
+  sample_rate: 16000
+  use_vad: true
+  vad_threshold: 0.5
+
+# Native Ollama LLM (no Docker needed - runs natively on macOS)
+llm:
+  base_url: "http://localhost:11434"  # Native Ollama, not Docker
+  model: "llama3.2:3b"               # Recommended for Apple Silicon
+  temperature: 0.7
+  max_tokens: 1000
+  top_p: 0.9
+  top_k: 40
+  system_prompt: "You are MaestroCat, a helpful AI voice assistant running natively on macOS. Keep responses concise and conversational. If interrupted, acknowledge it naturally."
+
+# Native macOS TTS (instead of Kokoro Docker)
+tts:
+  service: "macos"       # Options: "macos", "pyttsx3", "kokoro"
+  voice: "Samantha"      # macOS voice name (Samantha, Alex, Victoria, etc.)
+  rate: 200              # Words per minute
+  volume: 0.8            # 0.0 to 1.0
+  sample_rate: 22050     # macOS default for speech
+
+# Alternative TTS configurations
+tts_alternatives:
+  # macOS System TTS with different voice
+  alex:
+    service: "macos"
+    voice: "Alex"
+    rate: 180
+    volume: 0.9
+    sample_rate: 22050
+    
+  # PyTTSx3 TTS (requires: pip install pyttsx3 pyobjc)
+  pyttsx3:
+    service: "pyttsx3"
+    voice_id: null         # Use default voice
+    rate: 200
+    volume: 0.8
+    sample_rate: 22050
+    
+  # Kokoro TTS (if Docker is available)
+  kokoro:
+    service: "kokoro"
+    base_url: "http://localhost:5000"
+    voice: "af_bella"
+    speed: 1.0
+    sample_rate: 24000
+
+interruption:
+  threshold: 0.2
+  ack_delay: 0.05
+
+modules:
+  voice_recognition:
+    enabled: false
+    model: "speechbrain/spkrec-ecapa-voxceleb"
+  memory:
+    enabled: false
+    max_history: 100
+
+# macOS-specific settings
+macos:
+  # Audio settings
+  audio:
+    input_device: null     # null = use default microphone
+    output_device: null    # null = use default speakers
+    buffer_size: 1024      # Audio buffer size
+    
+  # Performance settings for Apple Silicon
+  performance:
+    whisper_threads: 4     # Number of threads for Whisper.cpp
+    ollama_threads: 0      # 0 = auto-detect cores
+    metal_acceleration: true  # Use Metal GPU acceleration where available
+    
+  # Service installation hints
+  dependencies:
+    whisper_cpp: "brew install whisper-cpp"
+    ollama: "brew install ollama"
+    ffmpeg: "brew install ffmpeg"  # Optional for audio processing
+    
+# Development settings
+development:
+  log_level: "INFO"
+  debug_ui: true
+  debug_port: 8080
+  websocket_port: 8765
+  
+# Production optimizations for Apple Silicon
+production:
+  # Smaller models for better performance
+  stt:
+    model_size: "tiny"     # Fastest Whisper model
+    
+  llm:
+    model: "llama3.2:1b"   # Smaller, faster model
+    
+  # Optimized for real-time performance
+  audio:
+    buffer_size: 512       # Smaller buffer for lower latency
+    
+  performance:
+    whisper_threads: 2     # Fewer threads to leave resources for LLM
