@@ -48,9 +48,9 @@ def check_dependencies(platform_type):
         except:
             missing.append("Ollama not available (install with: brew install ollama)")
         
-        # Check Whisper.cpp (try multiple binary names)
+        # Check Whisper.cpp (try multiple binary names, whisper-cli is the new name)
         whisper_found = False
-        for whisper_cmd in ["whisper-cpp", "whisper"]:
+        for whisper_cmd in ["whisper-cli", "whisper-cpp", "whisper"]:
             try:
                 subprocess.run([whisper_cmd, "--help"], capture_output=True, check=True)
                 whisper_found = True

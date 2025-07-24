@@ -7,16 +7,13 @@ vad:
   min_speech_ms: 250
   pause_ms: 800
 
-# Native Whisper.cpp STT (instead of WhisperLive Docker)
+# Pipecat MLX Whisper STT (optimized for Apple Silicon)
 stt:
-  service: "whispercpp"  # Options: "whispercpp", "whisperlive" 
-  model_size: "base"     # Options: "tiny", "base", "small", "medium", "large"
-  model_path: null       # Auto-download to ~/.cache/whisper if null
-  language: "en"
+  service: "mlx-whisper"  # Uses Pipecat's WhisperSTTServiceMLX
+  model_size: "medium"    # Options: "tiny", "medium", "large-v3", "large-v3-turbo", "distil-large-v3"
+  language: "en"          # Language code or "auto" for detection
   translate: false
   sample_rate: 16000
-  use_vad: true
-  vad_threshold: 0.5
 
 # Native Ollama LLM (no Docker needed - runs natively on macOS)
 llm:
@@ -84,13 +81,13 @@ macos:
     
   # Performance settings for Apple Silicon
   performance:
-    whisper_threads: 4     # Number of threads for Whisper.cpp
+    mlx_whisper: true      # Use MLX acceleration for Whisper
     ollama_threads: 0      # 0 = auto-detect cores
     metal_acceleration: true  # Use Metal GPU acceleration where available
     
   # Service installation hints
   dependencies:
-    whisper_cpp: "brew install whisper-cpp"
+    mlx_whisper: "pip install 'pipecat-ai[mlx-whisper]'"
     ollama: "brew install ollama"
     ffmpeg: "brew install ffmpeg"  # Optional for audio processing
     
@@ -115,4 +112,4 @@ production:
     buffer_size: 512       # Smaller buffer for lower latency
     
   performance:
-    whisper_threads: 2     # Fewer threads to leave resources for LLM
+    mlx_optimization: true  # Enable MLX optimizations for better performance

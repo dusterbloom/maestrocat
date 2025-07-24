@@ -1,7 +1,7 @@
 # examples/local_maestrocat_macos.py
 """
 MaestroCat agent example for macOS using native services:
-- Whisper.cpp for STT
+- Pipecat MLX Whisper for STT (optimized for Apple Silicon)
 - Native Ollama for LLM  
 - macOS System TTS
 """
@@ -9,6 +9,7 @@ MaestroCat agent example for macOS using native services:
 import asyncio
 import logging
 import os
+import subprocess
 import sys
 from typing import Optional
 
@@ -38,7 +39,7 @@ from core.processors import (
     EventEmitter,
     ModuleLoader
 )
-from core.services.whispercpp_stt import WhisperCppSTTService
+from pipecat.services.whisper.stt import WhisperSTTServiceMLX, MLXModel
 from core.services.macos_tts import MacOSTTSService, MacOSPyTTSx3Service
 from core.utils import MaestroCatConfig
 from core.modules import VoiceRecognitionModule, MemoryModule
@@ -46,7 +47,7 @@ from core.apps.debug_ui import DebugUIServer
 from core.serializers import RawAudioSerializer
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 
@@ -112,31 +113,28 @@ class MacOSMaestroCatAgent:
     async def _create_services(self):
         """Create STT, LLM, and TTS services based on configuration"""
         
-        # Create STT service
+        # Create STT service - Use Pipecat's MLX Whisper (optimized for Apple Silicon)
         stt_config = self.config.stt
-        if stt_config.service == 'whispercpp':
-            logger.info("Using Whisper.cpp STT service")
-            self.stt = WhisperCppSTTService(
-                model_path=stt_config.model_path,
-                model_size=stt_config.model_size,
-                language=stt_config.language,
-                translate=stt_config.translate,
-                use_vad=stt_config.use_vad,
-                vad_threshold=stt_config.vad_threshold,
-                sample_rate=stt_config.sample_rate
-            )
-        else:
-            # Fallback to WhisperLive if available
-            from core.services import WhisperLiveSTTService
-            logger.info("Using WhisperLive STT service")
-            self.stt = WhisperLiveSTTService(
-                host=stt_config.host,
-                port=stt_config.port,
-                language=stt_config.language,
-                translate=stt_config.translate,
-                model=stt_config.model_size,
-                use_vad=stt_config.use_vad
-            )
+        logger.info(f"Using Pipecat MLX Whisper STT service with model: {stt_config.model_size}")
+        
+        # Map model sizes to MLXModel enum values (only these models are available)
+        model_mapping = {
+            "tiny": MLXModel.TINY,
+            "base": MLXModel.MEDIUM,  # Use medium as base fallback
+            "small": MLXModel.MEDIUM,  # Use medium as small fallback
+            "medium": MLXModel.MEDIUM,
+            "large": MLXModel.LARGE_V3,
+            "large-v3": MLXModel.LARGE_V3,
+            "large-v3-turbo": MLXModel.LARGE_V3_TURBO,
+            "distil-large-v3": MLXModel.DISTIL_LARGE_V3
+        }
+        
+        model = model_mapping.get(stt_config.model_size, MLXModel.MEDIUM)
+        
+        self.stt = WhisperSTTServiceMLX(
+            model=model,
+            language=stt_config.language if stt_config.language != "auto" else None
+        )
         
         # Create LLM service (native Ollama)
         llm_config = self.config.llm
@@ -340,16 +338,16 @@ def check_dependencies():
     except:
         missing.append("Ollama not available (install with: brew install ollama)")
     
-    # Check Whisper.cpp
-    import subprocess
+    # Check MLX is available (for Apple Silicon Whisper)
     try:
-        subprocess.run(["whisper", "--help"], capture_output=True, check=True)
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        missing.append("whisper.cpp not found (install with: brew install whisper-cpp)")
+        import mlx
+        logger.info("MLX framework available for Apple Silicon optimization")
+    except ImportError:
+        logger.warning("MLX not available - Whisper will use CPU fallback")
     
     # Check macOS say command
     try:
-        subprocess.run(["say", "--help"], capture_output=True, check=True)
+        subprocess.run(["which", "say"], capture_output=True, check=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
         missing.append("macOS 'say' command not available")
     
@@ -358,7 +356,8 @@ def check_dependencies():
         for dep in missing:
             logger.error(f"  - {dep}")
         logger.info("\nInstallation commands:")
-        logger.info("  brew install ollama whisper-cpp")
+        logger.info("  brew install ollama")
+        logger.info("  pip install 'pipecat-ai[mlx-whisper]'  # Install MLX Whisper")
         logger.info("  ollama serve  # Start Ollama server")
         logger.info("  ollama pull llama3.2:3b  # Download model")
         return False

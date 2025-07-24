@@ -64,8 +64,8 @@ class WhisperCppSTTService(STTService):
         
     def _find_whisper_binary(self) -> Optional[str]:
         """Find whisper.cpp binary in common locations"""
-        # Check common binary names
-        binary_names = ["whisper-cpp", "whisper"]
+        # Check common binary names (whisper-cli is the new name)
+        binary_names = ["whisper-cli", "whisper-cpp", "whisper"]
         
         # Check common installation paths
         base_paths = [
@@ -150,7 +150,9 @@ class WhisperCppSTTService(STTService):
         self._running = True
         self._processing_thread = threading.Thread(target=self._processing_loop)
         self._processing_thread.start()
-        logger.info("WhisperCpp STT service started")
+        logger.info(f"WhisperCpp STT service started with model: {self._model_path}")
+        logger.info(f"Whisper binary: {self._whisper_bin}")
+        logger.info(f"Language: {self._language}, Model size: {self._model_size}")
         
     async def stop(self):
         """Stop the STT service"""
@@ -167,29 +169,38 @@ class WhisperCppSTTService(STTService):
         
     def _processing_loop(self):
         """Background thread for processing audio with whisper.cpp"""
+        logger.info("WhisperCpp processing loop started")
         while self._running:
             try:
                 # Get audio from queue with timeout
+                logger.debug("Waiting for audio from queue...")
                 audio_data = self._audio_queue.get(timeout=1.0)
                 
                 if audio_data is None:
+                    logger.info("Received None, stopping processing loop")
                     break
                     
+                logger.info(f"Processing audio chunk: {len(audio_data)} bytes")
+                
                 # Process with whisper.cpp
                 transcription = self._process_audio_chunk(audio_data)
                 
                 if transcription:
+                    logger.info(f"Got transcription: '{transcription}'")
                     # Use asyncio to push the transcription frame
                     asyncio.run_coroutine_threadsafe(
                         self._handle_transcription(transcription),
                         asyncio.get_event_loop()
                     )
+                else:
+                    logger.warning("No transcription returned from whisper.cpp")
                     
             except queue.Empty:
                 continue
             except Exception as e:
                 logger.error(f"Error in processing loop: {e}")
-                
+                break
+        logger.info("WhisperCpp processing loop ended")
     def _process_audio_chunk(self, audio_data: bytes) -> Optional[str]:
         """Process audio chunk with whisper.cpp"""
         try:
@@ -200,7 +211,7 @@ class WhisperCppSTTService(STTService):
                 # Convert raw audio to WAV format
                 self._write_wav(temp_file, audio_data)
                 
-            # Run whisper.cpp
+            # Run whisper.cpp (updated for whisper-cli)
             cmd = [
                 self._whisper_bin,
                 "-m", self._model_path,
@@ -209,8 +220,7 @@ class WhisperCppSTTService(STTService):
                 "--no-timestamps",
                 "--print-colors", "false",
                 "--print-progress", "false",
-                "--print-realtime", "false",
-                "--print-special", "false",
+                "--no-prints",  # Only output the transcription
                 "--threads", "4",
                 "--processors", "1"
             ]
@@ -218,14 +228,22 @@ class WhisperCppSTTService(STTService):
             if self._translate:
                 cmd.append("--translate")
                 
-            # Add VAD options if enabled
+            # Add VAD options if enabled (updated syntax)
             if self._use_vad:
-                cmd.extend(["--vad-thold", str(self._vad_threshold)])
+                cmd.extend(["--vad"])
+                cmd.extend(["--vad-threshold", str(self._vad_threshold)])
                 
+            logger.info(f"Running whisper.cpp command: {' '.join(cmd)}")
             result = subprocess.run(cmd, capture_output=True, text=True)
             
             # Clean up temp file
             os.unlink(temp_path)
+            
+            logger.info(f"Whisper.cpp exit code: {result.returncode}")
+            if result.stderr:
+                logger.warning(f"Whisper.cpp stderr: {result.stderr}")
+            if result.stdout:
+                logger.info(f"Whisper.cpp stdout: {result.stdout}")
             
             if result.returncode == 0:
                 # Extract transcription from output
@@ -307,6 +325,11 @@ class WhisperCppSTTService(STTService):
             # Add audio to buffer
             self._audio_buffer.extend(frame.audio)
             
+            # Log audio frame details
+            audio_samples = np.frombuffer(frame.audio, dtype=np.int16)
+            max_amplitude = np.max(np.abs(audio_samples)) if len(audio_samples) > 0 else 0
+            logger.debug(f"Audio frame: {len(frame.audio)} bytes, max_amplitude: {max_amplitude}")
+            
             # Process in chunks to balance latency and accuracy
             chunk_size = int(1.0 * self._sample_rate * 2)  # 1 second chunks
             
@@ -318,10 +341,15 @@ class WhisperCppSTTService(STTService):
                 audio_samples = np.frombuffer(chunk_data, dtype=np.int16)
                 max_amplitude = np.max(np.abs(audio_samples)) if len(audio_samples) > 0 else 0
                 
+                logger.info(f"Processing audio chunk: {len(chunk_data)} bytes, max_amplitude: {max_amplitude}")
+                
                 # Only process audio with significant amplitude
                 if max_amplitude > 1000:  # Threshold for speech detection
+                    logger.info(f"Audio chunk above threshold, adding to queue")
                     # Add to processing queue
                     self._audio_queue.put(chunk_data)
+                else:
+                    logger.debug(f"Audio chunk below threshold ({max_amplitude} <= 1000)")
                     
             # Pass the frame downstream
             await self.push_frame(frame, direction)
