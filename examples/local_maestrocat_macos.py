@@ -39,9 +39,11 @@ from core.processors import (
     InterruptionHandler,
     MetricsCollector,
     EventEmitter,
-    ModuleLoader
+    ModuleLoader,
+    TranscriptionEventProcessor
 )
 from pipecat.services.whisper.stt import WhisperSTTServiceMLX, MLXModel
+from core.services.whispercpp_stt import WhisperCppSTTService
 from core.services.macos_tts import MacOSTTSService, MacOSPyTTSx3Service
 from core.utils import MaestroCatConfig
 from core.modules import VoiceRecognitionModule, MemoryModule
@@ -71,6 +73,7 @@ class MacOSMaestroCatAgent:
         self.llm = None
         self.tts = None
         self.interruption_handler = None
+        self.transcription_events = None
         
     async def setup(self):
         """Set up the voice agent pipeline"""
@@ -79,7 +82,7 @@ class MacOSMaestroCatAgent:
         self.event_emitter = EventEmitter(buffer_size=1000, emit_as_frames=False)
         
         # Create metrics collector
-        self.metrics_collector = MetricsCollector(emit_interval=5.0)
+        self.metrics_collector = MetricsCollector(emit_interval=5.0, event_emitter=self.event_emitter)
         
         # Create and configure debug UI
         self.debug_ui = DebugUIServer(port=self.config.development.get('debug_port', 8080))
@@ -139,6 +142,9 @@ class MacOSMaestroCatAgent:
             language=stt_config.language if stt_config.language != "auto" else None
         )
         
+        # Create transcription event processor for debug UI
+        self.transcription_events = TranscriptionEventProcessor(event_emitter=self.event_emitter)
+        
         # Create LLM service (native Ollama)
         llm_config = self.config.llm
         base_url = llm_config.base_url
@@ -150,7 +156,8 @@ class MacOSMaestroCatAgent:
             temperature=llm_config.temperature,
             max_tokens=llm_config.max_tokens,
             top_p=llm_config.top_p,
-            top_k=llm_config.top_k
+            top_k=llm_config.top_k,
+            event_emitter=self.event_emitter
         )
         
         # Create TTS service
@@ -163,7 +170,8 @@ class MacOSMaestroCatAgent:
                 voice=tts_config.voice,
                 rate=tts_config.rate,
                 volume=tts_config.volume,
-                sample_rate=tts_config.sample_rate
+                sample_rate=tts_config.sample_rate,
+                event_emitter=self.event_emitter
             )
         elif tts_service == 'pyttsx3':
             logger.info("Using PyTTSx3 TTS service")
@@ -171,7 +179,8 @@ class MacOSMaestroCatAgent:
                 voice_id=tts_config.voice_id,
                 rate=tts_config.rate,
                 volume=tts_config.volume,
-                sample_rate=tts_config.sample_rate
+                sample_rate=tts_config.sample_rate,
+                event_emitter=self.event_emitter
             )
         elif tts_service == 'native_kokoro':
             # Use native Kokoro ONNX TTS for 5-10x performance improvement over Docker
@@ -181,7 +190,8 @@ class MacOSMaestroCatAgent:
                 self.tts = NativeKokoroTTSService(
                     voice=tts_config.voice,
                     speed=tts_config.speed,
-                    sample_rate=tts_config.sample_rate
+                    sample_rate=tts_config.sample_rate,
+                    event_emitter=self.event_emitter
                 )
             except Exception as e:
                 logger.warning(f"Failed to initialize Native Kokoro, falling back to macOS TTS: {e}")
@@ -189,7 +199,8 @@ class MacOSMaestroCatAgent:
                     voice="Samantha",
                     rate=180,
                     volume=0.9,
-                    sample_rate=22050
+                    sample_rate=22050,
+                    event_emitter=self.event_emitter
                 )
         else:
             # Default fallback to macOS System TTS
@@ -198,7 +209,8 @@ class MacOSMaestroCatAgent:
                 voice="Samantha",
                 rate=180,
                 volume=0.9,
-                sample_rate=22050
+                sample_rate=22050,
+                event_emitter=self.event_emitter
             )
         
         # Create interruption handler

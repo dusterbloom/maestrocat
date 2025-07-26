@@ -53,7 +53,7 @@ class EventEmitter(FrameProcessor):
         self._event_count += 1
         self._event_buffer.append(event)
         
-        # Call subscribers
+        # Call subscribers for specific event type
         for callback in self._subscribers[event_type]:
             try:
                 if asyncio.iscoroutinefunction(callback):
@@ -62,6 +62,16 @@ class EventEmitter(FrameProcessor):
                     callback(event)
             except Exception as e:
                 logger.error(f"Error in event callback: {e}")
+        
+        # Call wildcard ("*") subscribers for all events
+        for callback in self._subscribers["*"]:
+            try:
+                if asyncio.iscoroutinefunction(callback):
+                    await callback(event)
+                else:
+                    callback(event)
+            except Exception as e:
+                logger.error(f"Error in wildcard event callback: {e}")
                 
         # Emit as frame if enabled
         if self.emit_as_frames:

@@ -30,6 +30,7 @@ class MacOSTTSService(TTSService):
         rate: int = 200,  # Words per minute
         volume: float = 0.8,
         sample_rate: int = 22050,  # macOS default for speech
+        event_emitter = None,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -38,6 +39,7 @@ class MacOSTTSService(TTSService):
         self._rate = rate
         self._volume = volume
         self._sample_rate = sample_rate
+        self._event_emitter = event_emitter
         
         # Get available voices and validate
         self._available_voices = self._get_available_voices()
@@ -168,6 +170,14 @@ class MacOSTTSService(TTSService):
             return
             
         try:
+            # Emit TTS start event
+            if self._event_emitter:
+                await self._event_emitter.emit("tts_audio_start", {
+                    "text": text,
+                    "voice": self._voice,
+                    "timestamp": time.time()
+                })
+            
             # Create temporary file for audio output
             with tempfile.NamedTemporaryFile(suffix='.aiff', delete=False) as temp_file:
                 temp_path = temp_file.name
@@ -218,6 +228,15 @@ class MacOSTTSService(TTSService):
                     await asyncio.sleep(0.05)  # 50ms between chunks
                     
                 offset += chunk_size
+            
+            # Emit TTS complete event
+            if self._event_emitter:
+                await self._event_emitter.emit("tts_audio_complete", {
+                    "text": text,
+                    "voice": self._voice,
+                    "audio_length_bytes": len(audio_data),
+                    "timestamp": time.time()
+                })
                 
         except Exception as e:
             logger.error(f"macOS TTS error: {e}")
@@ -237,6 +256,7 @@ class MacOSPyTTSx3Service(TTSService):
         rate: int = 200,
         volume: float = 0.8,
         sample_rate: int = 22050,
+        event_emitter = None,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -245,6 +265,7 @@ class MacOSPyTTSx3Service(TTSService):
         self._rate = rate
         self._volume = volume
         self._sample_rate = sample_rate
+        self._event_emitter = event_emitter
         
         # Import pyttsx3 (optional dependency)
         try:
@@ -285,6 +306,14 @@ class MacOSPyTTSx3Service(TTSService):
             return
             
         try:
+            # Emit TTS start event
+            if self._event_emitter:
+                await self._event_emitter.emit("tts_audio_start", {
+                    "text": text,
+                    "voice": self._voice_id or "default",
+                    "timestamp": time.time()
+                })
+            
             # Create temporary file for audio output
             with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
                 temp_path = temp_file.name
@@ -325,6 +354,15 @@ class MacOSPyTTSx3Service(TTSService):
                             await asyncio.sleep(0.01)  # Small delay
                             
                         offset += chunk_size
+                        
+                    # Emit TTS complete event
+                    if self._event_emitter:
+                        await self._event_emitter.emit("tts_audio_complete", {
+                            "text": text,
+                            "voice": self._voice_id or "default",
+                            "audio_length_bytes": len(audio_data),
+                            "timestamp": time.time()
+                        })
             else:
                 logger.error("pyttsx3 failed to create audio file")
                 

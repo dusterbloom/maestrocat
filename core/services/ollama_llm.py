@@ -3,6 +3,7 @@
 import asyncio
 import json
 import httpx
+import time
 from typing import AsyncGenerator, Optional, Dict, Any
 import logging
 
@@ -29,6 +30,7 @@ class OLLamaLLMService(LLMService):
         max_tokens: int = 1000,
         top_p: float = 0.9,
         top_k: int = 40,
+        event_emitter = None,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -39,6 +41,7 @@ class OLLamaLLMService(LLMService):
         self._max_tokens = max_tokens
         self._top_p = top_p
         self._top_k = top_k
+        self._event_emitter = event_emitter
         
         # Optimized HTTP client with connection pooling
         self._client = httpx.AsyncClient(
@@ -138,7 +141,12 @@ class OLLamaLLMService(LLMService):
                 }
             }
             
-            # No need to yield start frame here - parent handles it
+            # Emit LLM response start event
+            if self._event_emitter:
+                await self._event_emitter.emit("llm_response_start", {
+                    "model": self._model,
+                    "timestamp": time.time()
+                })
             
             # Stream response
             async with self._client.stream(
@@ -166,6 +174,14 @@ class OLLamaLLMService(LLMService):
                             token = data["message"]["content"]
                             if token:
                                 full_response += token
+                                
+                                # Emit chunk event for debug UI
+                                if self._event_emitter:
+                                    await self._event_emitter.emit("llm_response_chunk", {
+                                        "chunk": token,
+                                        "timestamp": time.time()
+                                    })
+                                
                                 yield TextFrame(token)
                                 
                         # Check if done
@@ -182,7 +198,13 @@ class OLLamaLLMService(LLMService):
                         "content": full_response
                     })
                     
-            # No need to yield end frame here - parent handles it
+                    # Emit completion event
+                    if self._event_emitter:
+                        await self._event_emitter.emit("llm_response_complete", {
+                            "text": full_response,
+                            "model": self._model,
+                            "timestamp": time.time()
+                        })
             
         except asyncio.CancelledError:
             logger.info("LLM generation cancelled - stopping immediately")
@@ -202,6 +224,22 @@ class OLLamaLLMService(LLMService):
         
         if isinstance(frame, OpenAILLMContextFrame):
             context = frame.context
+            
+            # Emit transcription event for the user's message
+            if self._event_emitter and context.messages:
+                # Find the last user message in the context
+                user_messages = [msg for msg in context.messages if msg.get("role") == "user"]
+                if user_messages:
+                    last_user_message = user_messages[-1]
+                    user_text = last_user_message.get("content", "")
+                    if user_text and user_text.strip():
+                        await self._event_emitter.emit("transcription_final", {
+                            "text": user_text,
+                            "confidence": 1.0,
+                            "timestamp": time.time(),
+                            "user_id": "user"
+                        })
+            
             try:
                 await self.push_frame(LLMFullResponseStartFrame())
                 async for response_frame in self.get_chat_completions(context):

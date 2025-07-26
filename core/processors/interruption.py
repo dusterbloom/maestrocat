@@ -130,11 +130,13 @@ class MetricsCollector(FrameProcessor):
     def __init__(
         self,
         emit_interval: float = 10.0,
-        event_callback: Optional[callable] = None
+        event_callback: Optional[callable] = None,
+        event_emitter = None
     ):
         super().__init__()
         self.emit_interval = emit_interval
         self.event_callback = event_callback
+        self._event_emitter = event_emitter
         
         self.metrics = PipelineMetrics()
         self._component_starts: Dict[str, float] = {}
@@ -191,8 +193,13 @@ class MetricsCollector(FrameProcessor):
             "total_latency_ms": self.metrics.total_latency,
             "frames_processed": self.metrics.frames_processed,
             "errors": self.metrics.errors,
-            "component_timings": self.metrics.component_timings.copy()
+            "component_timings": self.metrics.component_timings.copy(),
+            "timestamp": time.time()
         }
+        
+        # Emit event for debug UI
+        if self._event_emitter:
+            await self._event_emitter.emit("metrics_update", metrics_data)
         
         # Emit as system frame
         # Use TextFrame to carry metrics data

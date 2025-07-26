@@ -31,6 +31,7 @@ class WhisperLiveSTTService(STTService):
         model: str = "small",
         use_vad: bool = True,
         vad_threshold: float = 0.3,  # Lower threshold for more sensitive detection
+        event_emitter = None,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -42,6 +43,7 @@ class WhisperLiveSTTService(STTService):
         self._model = model
         self._use_vad = use_vad
         self._vad_threshold = vad_threshold
+        self._event_emitter = event_emitter
         
         self._websocket = None
         self._receive_task = None

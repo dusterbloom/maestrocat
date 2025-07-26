@@ -26,6 +26,7 @@ class NativeKokoroTTSService(TTSService):
         voice: str = "af_bella",
         speed: float = 1.0,
         sample_rate: int = 24000,
+        event_emitter = None,
         **kwargs
     ):
         super().__init__(
@@ -36,6 +37,7 @@ class NativeKokoroTTSService(TTSService):
         self._voice = voice
         self._speed = speed
         self._sample_rate = sample_rate
+        self._event_emitter = event_emitter
         
         # Thread pool for non-blocking TTS generation
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="kokoro-tts")
@@ -143,6 +145,14 @@ class NativeKokoroTTSService(TTSService):
             
         logger.debug(f"Generating TTS for: '{text[:50]}{'...' if len(text) > 50 else ''}'")
         
+        # Emit TTS start event
+        if self._event_emitter:
+            await self._event_emitter.emit("tts_audio_start", {
+                "text": text,
+                "voice": self._voice,
+                "timestamp": time.time()
+            })
+        
         yield TTSStartedFrame()
         
         try:
@@ -172,6 +182,15 @@ class NativeKokoroTTSService(TTSService):
                     )
                     
                     yield frame
+                    
+                    # Emit TTS complete event
+                    if self._event_emitter:
+                        await self._event_emitter.emit("tts_audio_complete", {
+                            "text": text,
+                            "voice": self._voice,
+                            "audio_length_bytes": len(audio_int16.tobytes()),
+                            "timestamp": time.time()
+                        })
                 
             else:
                 logger.warning("No audio data generated")

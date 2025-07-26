@@ -35,6 +35,7 @@ class WhisperCppSTTService(STTService):
         use_vad: bool = True,
         vad_threshold: float = 0.5,
         sample_rate: int = 16000,
+        event_emitter = None,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -46,6 +47,7 @@ class WhisperCppSTTService(STTService):
         self._use_vad = use_vad
         self._vad_threshold = vad_threshold
         self._sample_rate = sample_rate
+        self._event_emitter = event_emitter
         
         self._audio_buffer = bytearray()
         self._processing_thread = None
@@ -306,6 +308,15 @@ class WhisperCppSTTService(STTService):
             return
             
         logger.info(f"Transcription: '{text}'")
+        
+        # Emit transcription event for debug UI
+        if self._event_emitter:
+            await self._event_emitter.emit("transcription_final", {
+                "text": text,
+                "confidence": 1.0,  # Whisper.cpp doesn't provide confidence
+                "timestamp": time.time(),
+                "user_id": "user"
+            })
         
         # Create transcription frame
         frame = TranscriptionFrame(
