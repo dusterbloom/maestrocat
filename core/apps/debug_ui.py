@@ -77,6 +77,8 @@ class DebugUIServer:
         self.config: Optional[MaestroCatConfig] = None
         self.metrics_history = []
         self.event_history = []
+        self.transcription_buffer = {}
+        self.active_sessions = set()
         
     def attach_event_emitter(self, event_emitter: EventEmitter):
         """Attach to pipeline's event emitter"""
@@ -96,12 +98,27 @@ class DebugUIServer:
         if len(self.event_history) > 1000:
             self.event_history.pop(0)
             
-        # Special handling for metrics
+        # Special handling for different event types
         if event["type"] == "metrics_update":
             self.metrics_history.append({
                 "timestamp": event["timestamp"],
                 "data": event["data"]
             })
+            # Keep only last 100 metrics
+            if len(self.metrics_history) > 100:
+                self.metrics_history.pop(0)
+                
+        elif event["type"] == "transcription_partial":
+            # Handle partial transcription streaming
+            transcript_id = event["data"].get("transcript_id")
+            if transcript_id:
+                self.transcription_buffer[transcript_id] = event["data"]
+                
+        elif event["type"] == "transcription_final":
+            # Clean up transcription buffer
+            transcript_id = event["data"].get("transcript_id")
+            if transcript_id and transcript_id in self.transcription_buffer:
+                del self.transcription_buffer[transcript_id]
             
         # Broadcast to connected clients
         await manager.broadcast({
@@ -175,6 +192,27 @@ async def websocket_endpoint(websocket: WebSocket):
                         }
                     )
                     
+            elif message_type == "command":
+                # Handle command execution
+                command = data.get("command")
+                params = data.get("params", {})
+                
+                if debug_server.event_emitter:
+                    await debug_server.event_emitter.emit(
+                        "command_executed",
+                        {
+                            "command": command,
+                            "params": params
+                        }
+                    )
+                    
+            elif message_type == "ping":
+                # Handle ping/pong for connection health
+                await websocket.send_json({
+                    "type": "pong",
+                    "timestamp": datetime.now().timestamp()
+                })
+                    
             elif message_type == "get_events":
                 # Send event history
                 since = data.get("since", 0)
@@ -183,6 +221,33 @@ async def websocket_endpoint(websocket: WebSocket):
                     "type": "event_history",
                     "events": events
                 })
+                
+            elif message_type == "clear_events":
+                # Clear event history
+                debug_server.event_history.clear()
+                await websocket.send_json({
+                    "type": "events_cleared"
+                })
+                
+            elif message_type == "export_request":
+                # Handle export requests
+                export_type = data.get("export_type")
+                if export_type == "events":
+                    await websocket.send_json({
+                        "type": "export_data",
+                        "data": {
+                            "events": debug_server.event_history,
+                            "timestamp": datetime.now().isoformat()
+                        }
+                    })
+                elif export_type == "metrics":
+                    await websocket.send_json({
+                        "type": "export_data",
+                        "data": {
+                            "metrics": debug_server.metrics_history,
+                            "timestamp": datetime.now().isoformat()
+                        }
+                    })
                 
     except WebSocketDisconnect:
         manager.disconnect(websocket)
@@ -194,6 +259,34 @@ async def get_metrics():
     if debug_server.metrics_history:
         return debug_server.metrics_history[-1]
     return {}
+
+
+@app.get("/api/metrics/history")
+async def get_metrics_history(limit: int = 100):
+    """Get metrics history"""
+    return debug_server.metrics_history[-limit:]
+
+
+@app.get("/api/events")
+async def get_events(limit: int = 100, event_type: str = None):
+    """Get recent events with optional filtering"""
+    events = debug_server.event_history[-limit:]
+    if event_type:
+        events = [e for e in events if e.get("type") == event_type]
+    return events
+
+
+@app.delete("/api/events")
+async def clear_events():
+    """Clear event history"""
+    debug_server.event_history.clear()
+    return {"status": "cleared"}
+
+
+@app.get("/api/transcription/buffer")
+async def get_transcription_buffer():
+    """Get current transcription buffer"""
+    return debug_server.transcription_buffer
 
 
 @app.get("/api/config")
@@ -216,6 +309,36 @@ async def update_config(component: str, update: ConfigUpdate):
             }
         )
     return {"status": "ok"}
+
+
+@app.post("/api/command")
+async def execute_command(command: dict):
+    """Execute a command from the command palette"""
+    command_id = command.get("id")
+    params = command.get("params", {})
+    
+    if debug_server.event_emitter:
+        await debug_server.event_emitter.emit(
+            "command_executed",
+            {
+                "command": command_id,
+                "params": params
+            }
+        )
+    
+    return {"status": "executed", "command": command_id}
+
+
+@app.get("/api/status")
+async def get_status():
+    """Get server status and statistics"""
+    return {
+        "connected_clients": len(manager.active_connections),
+        "event_count": len(debug_server.event_history),
+        "metrics_count": len(debug_server.metrics_history),
+        "transcription_buffers": len(debug_server.transcription_buffer),
+        "uptime": datetime.now().isoformat()
+    }
 
 
 # Simple HTML UI (fallback if ui/ directory doesn't exist)
