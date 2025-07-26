@@ -16,60 +16,23 @@ class RawAudioSerializer(FrameSerializer):
         """Get the serialization type - binary for raw audio data"""
         return FrameSerializerType.BINARY
         
-    async def serialize(self, frame: Frame) -> str | bytes | None:
-        """Serialize frame to WebSocket message"""
-        # Handle TTS audio output frames
+    async def serialize(self, frame):
         if isinstance(frame, (TTSAudioRawFrame, OutputAudioRawFrame)):
-            
-            # Check if audio already has WAV header
-            if len(frame.audio) >= 4:
-                header = frame.audio[:4]
-                if header == b'RIFF':
-                    # Already a WAV file, return as-is
-                    return frame.audio
-            
-            # Detect audio format and convert if needed
-            audio_data = frame.audio
-            bits_per_sample = 16  # Default to 16-bit for compatibility
-            
-            # Check if it's Float32 format (4 bytes per sample)
-            if len(audio_data) % 4 == 0:
-                try:
-                    # Try to interpret as float32
-                    audio_np = np.frombuffer(audio_data, dtype=np.float32)
-                    
-                    # Check for invalid values (NaN, infinity)
-                    if np.any(np.isnan(audio_np)) or np.any(np.isinf(audio_np)):
-                        # Skip conversion, treat as raw int16 data
-                        pass
-                    else:
-                        # Ensure values are in valid range [-1, 1] 
-                        audio_np = np.clip(audio_np, -1.0, 1.0)
-                        # Convert to 16-bit PCM for browser compatibility
-                        audio_int16 = (audio_np * 32767.0).astype(np.int16)
-                        audio_data = audio_int16.tobytes()
-                        bits_per_sample = 16
-                        print(f"Converted Float32 to Int16: {len(audio_np)} samples -> {len(audio_data)} bytes")
-                        
-                except Exception as e:
-                    print(f"Float32 conversion failed: {e}, treating as raw data")
-                    # If conversion fails, assume it's already int16
-                    pass
-            else:
-                print(f"Audio data not Float32-sized: {len(audio_data)} bytes")
-            
-            # Raw PCM data, add proper WAV header
+            if frame.audio[:4] == b'RIFF':          # already WAV
+                return frame.audio
+
+            # just add a header – no conversion!
             return self._add_wav_header(
-                audio_data, 
-                frame.sample_rate, 
-                frame.num_channels, 
-                bits_per_sample
+                pcm_data       = frame.audio,
+                sample_rate    = frame.sample_rate or 24000,
+                num_channels   = frame.num_channels or 1,
+                bits_per_sample= 16                # ← keep PCM‑16
             )
-        
-        # Return None for other frame types
         return None
+
+
     
-    def _add_wav_header(self, pcm_data: bytes, sample_rate: int, num_channels: int, bits_per_sample: int) -> bytes:
+    def _add_wav_header(self, pcm_data: bytes, sample_rate: int, num_channels: int, bits_per_sample: int, audio_format: int = 1) -> bytes:
         """Add WAV header to PCM data"""
         data_length = len(pcm_data)
         
@@ -84,13 +47,12 @@ class RawAudioSerializer(FrameSerializer):
         # "fmt " sub-chunk
         header[12:16] = b'fmt '
         header[16:20] = (16).to_bytes(4, 'little')  # subchunk size
-        header[20:22] = (1).to_bytes(2, 'little')  # audio format (1 = PCM)
+        header[20:22] = audio_format.to_bytes(2, 'little') 
         header[22:24] = num_channels.to_bytes(2, 'little')
         header[24:28] = sample_rate.to_bytes(4, 'little')
         header[28:32] = (sample_rate * num_channels * (bits_per_sample // 8)).to_bytes(4, 'little')  # byte rate
         header[32:34] = (num_channels * (bits_per_sample // 8)).to_bytes(2, 'little')  # block align
-        header[34:36] = bits_per_sample.to_bytes(2, 'little')
-        
+        header[34:36] = bits_per_sample.to_bytes(2, 'little')  # bits per sample
         # "data" sub-chunk
         header[36:40] = b'data'
         header[40:44] = data_length.to_bytes(4, 'little')
