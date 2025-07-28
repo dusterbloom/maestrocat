@@ -423,18 +423,34 @@ class MaestroCatAgent:
         )
         websocket_server = uvicorn.Server(websocket_config)
         
-        # Run both servers concurrently
+        # Run both servers with proper shutdown handling
         try:
-            await asyncio.gather(
-                self.debug_ui.start(),  # Debug UI
-                websocket_server.serve()  # WebSocket server
+            # Create tasks for both servers
+            debug_task = asyncio.create_task(self.debug_ui.start())
+            websocket_task = asyncio.create_task(websocket_server.serve())
+            
+            # Wait for any task to complete or fail
+            done, pending = await asyncio.wait(
+                [debug_task, websocket_task],
+                return_when=asyncio.FIRST_COMPLETED
             )
+            
+            # Cancel any remaining tasks
+            for task in pending:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                    
         except KeyboardInterrupt:
-            logger.info("Shutting down MaestroCat Agent...")
+            logger.info("🛑 Shutting down MaestroCat Agent...")
         except Exception as e:
-            logger.error(f"Error running agent: {e}")
+            logger.error(f"❌ Error running agent: {e}")
         finally:
+            logger.info("🧹 Cleaning up agent...")
             await self.cleanup()
+            logger.info("✅ Agent cleanup complete")
     
     def _log_startup_info(self, websocket_port: int, debug_port: int):
         """Log detailed startup information"""

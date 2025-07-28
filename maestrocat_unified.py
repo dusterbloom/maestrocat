@@ -18,6 +18,7 @@ Features:
 import asyncio
 import argparse
 import logging
+import signal
 import sys
 from pathlib import Path
 from typing import Optional
@@ -50,6 +51,7 @@ class MaestroCatLauncher:
     def __init__(self):
         self.agent = None
         self.platform_info = None
+        self._shutdown_event = None
     
     async def check_platform_compatibility(self, 
                                          platform_type: Optional[PlatformType] = None) -> bool:
@@ -211,6 +213,8 @@ class MaestroCatLauncher:
             self.agent = MaestroCatAgent(config=config, platform_override=platform_type)
             
             logger.info("🎭 Starting MaestroCat Universal Agent...")
+            
+            # Run agent - it handles its own shutdown
             await self.agent.run(host=host, websocket_port=port)
             
             return 0
@@ -223,7 +227,9 @@ class MaestroCatLauncher:
             return 1
         finally:
             if self.agent:
+                logger.info("🧹 Cleaning up MaestroCat Agent...")
                 await self.agent.cleanup()
+                logger.info("✅ Cleanup complete")
     
     def print_platform_status(self):
         """Print detailed platform status information"""

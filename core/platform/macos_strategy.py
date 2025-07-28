@@ -298,13 +298,14 @@ class MacOSPlatformStrategy(PlatformStrategy):
                 logger.info("⚡ Using MLX Whisper with model preloading for instant first transcription")
                 
                 # Map model sizes to MLXModel enum (available: TINY, MEDIUM, LARGE_V3, LARGE_V3_TURBO, DISTIL_LARGE_V3, LARGE_V3_TURBO_Q4)
+                # Note: Pipecat's MLXModel enum has limited options, so we map to closest available
                 model_mapping = {
-                    "tiny": MLXModel.TINY,
-                    "base": MLXModel.MEDIUM,          # Map base to medium (no BASE enum)
-                    "small": MLXModel.MEDIUM,         # Map small to medium (no SMALL enum)  
-                    "medium": MLXModel.MEDIUM,
-                    "large": MLXModel.LARGE_V3,
-                    "large-v3": MLXModel.LARGE_V3,
+                    "tiny": MLXModel.TINY,             # Smallest/fastest
+                    "base": MLXModel.TINY,             # Map base to tiny (closer to original base size)
+                    "small": MLXModel.TINY,            # Map small to tiny (for speed)
+                    "medium": MLXModel.MEDIUM,         # Direct mapping
+                    "large": MLXModel.LARGE_V3,        # Direct mapping
+                    "large-v3": MLXModel.LARGE_V3,     # Direct mapping
                     "large-v3-turbo": MLXModel.LARGE_V3_TURBO,
                     "large-v3-turbo-q4": MLXModel.LARGE_V3_TURBO_Q4,
                     "distil-large-v3": MLXModel.DISTIL_LARGE_V3
