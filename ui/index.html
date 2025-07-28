@@ -52,26 +52,55 @@
                     </div>
                 </header>
                 <div class="panel-content">
-                    <div class="metrics-grid">
-                        <div class="metric-card">
-                            <div class="metric-label">STT</div>
-                            <div class="metric-value" id="stt-latency">—</div>
-                            <div class="metric-unit">ms</div>
+                    <!-- Turn-based Developer Metrics (NEW) -->
+                    <div class="metrics-section">
+                        <h3 class="metrics-section-title">Current Turn (Developer Metrics)</h3>
+                        <div class="turn-metrics" id="current-turn-metrics">
+                            <div class="turn-info">
+                                <span class="turn-number">Turn #<span id="current-turn-number">—</span></span>
+                                <span class="turn-total">Total: <span id="current-turn-total">—</span>ms</span>
+                            </div>
+                            <div class="turn-breakdown">
+                                <div class="turn-stage">
+                                    <span class="stage-label">STT:</span>
+                                    <span class="stage-value" id="turn-stt">—ms</span>
+                                </div>
+                                <div class="turn-stage">
+                                    <span class="stage-label">LLM:</span>
+                                    <span class="stage-value" id="turn-llm">—ms</span>
+                                </div>
+                                <div class="turn-stage">
+                                    <span class="stage-label">TTS:</span>
+                                    <span class="stage-value" id="turn-tts">—ms</span>
+                                </div>
+                            </div>
                         </div>
-                        <div class="metric-card">
-                            <div class="metric-label">LLM</div>
-                            <div class="metric-value" id="llm-latency">—</div>
-                            <div class="metric-unit">ms</div>
-                        </div>
-                        <div class="metric-card">
-                            <div class="metric-label">TTS</div>
-                            <div class="metric-value" id="tts-latency">—</div>
-                            <div class="metric-unit">ms</div>
-                        </div>
-                        <div class="metric-card metric-card-primary">
-                            <div class="metric-label">TOTAL</div>
-                            <div class="metric-value" id="total-latency">—</div>
-                            <div class="metric-unit">ms</div>
+                    </div>
+                    
+                    <!-- Legacy Component Metrics -->
+                    <div class="metrics-section">
+                        <h3 class="metrics-section-title">Component Metrics (Live Updates)</h3>
+                        <div class="metrics-grid">
+                            <div class="metric-card">
+                                <div class="metric-label">STT</div>
+                                <div class="metric-value" id="stt-latency">—</div>
+                                <div class="metric-unit">ms</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-label">LLM</div>
+                                <div class="metric-value" id="llm-latency">—</div>
+                                <div class="metric-unit">ms</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-label">TTS</div>
+                                <div class="metric-value" id="tts-latency">—</div>
+                                <div class="metric-unit">ms</div>
+                            </div>
+                            <div class="metric-card metric-card-primary">
+                                <div class="metric-label">TOTAL</div>
+                                <div class="metric-value" id="total-latency">—</div>
+                                <div class="metric-unit">ms</div>
+                            </div>
                         </div>
                     </div>
                     <div class="metrics-chart" id="metrics-chart">

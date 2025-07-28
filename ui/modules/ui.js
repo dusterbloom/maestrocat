@@ -31,7 +31,14 @@ export class UIManager extends EventEmitter {
       audioControl: document.getElementById('audio-control'),
       
       // Toast container
-      toastContainer: document.getElementById('toast-container')
+      toastContainer: document.getElementById('toast-container'),
+      
+      // NEW: Turn metrics elements
+      currentTurnNumber: document.getElementById('current-turn-number'),
+      currentTurnTotal: document.getElementById('current-turn-total'),
+      turnSTT: document.getElementById('turn-stt'),
+      turnLLM: document.getElementById('turn-llm'),
+      turnTTS: document.getElementById('turn-tts')
     };
     
     // Set up event listeners
@@ -227,6 +234,39 @@ export class UIManager extends EventEmitter {
     
     if (checkbox) {
       checkbox.checked = isActive;
+    }
+  }
+  
+  // NEW: Update turn-based metrics display
+  updateTurnMetrics(turnData) {
+    if (this.elements.currentTurnNumber) {
+      this.elements.currentTurnNumber.textContent = turnData.turn_id;
+    }
+    
+    if (this.elements.currentTurnTotal) {
+      this.elements.currentTurnTotal.textContent = Math.round(turnData.total_latency_ms);
+    }
+    
+    if (this.elements.turnSTT) {
+      this.elements.turnSTT.textContent = `${Math.round(turnData.stt_latency_ms)}ms`;
+    }
+    
+    if (this.elements.turnLLM) {
+      this.elements.turnLLM.textContent = `${Math.round(turnData.llm_latency_ms)}ms`;
+    }
+    
+    if (this.elements.turnTTS) {
+      this.elements.turnTTS.textContent = `${Math.round(turnData.tts_latency_ms)}ms`;
+    }
+    
+    // Add visual feedback with a subtle highlight animation
+    const turnMetricsElement = document.getElementById('current-turn-metrics');
+    if (turnMetricsElement) {
+      turnMetricsElement.style.transition = 'all 200ms ease';
+      turnMetricsElement.style.borderColor = 'var(--color-accent)';
+      setTimeout(() => {
+        turnMetricsElement.style.borderColor = 'var(--color-gray-700)';
+      }, 1000);
     }
   }
   

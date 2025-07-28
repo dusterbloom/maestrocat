@@ -144,15 +144,7 @@ class OLLamaLLMService(LLMService):
                 }
             }
             
-            # Emit LLM response start event
-            if self._event_emitter:
-                logger.info(f"📤 Emitting LLM response start event")
-                await self._event_emitter.emit("llm_response_start", {
-                    "model": self._model,
-                    "timestamp": time.time()
-                })
-            else:
-                logger.warning("⚠️ No event emitter available for LLM events")
+            # Note: llm_response_start event will be emitted when first token arrives
             
             # Stream response
             async with self._client.stream(
@@ -185,8 +177,22 @@ class OLLamaLLMService(LLMService):
                                     first_token_latency = (time.time() - llm_start_time) * 1000
                                     first_token_received = True
                                     
-                                    # Emit first token metrics immediately
+                                    # Emit LLM response start event (now that first token has arrived)
                                     if self._event_emitter:
+                                        await self._event_emitter.emit("llm_response_start", {
+                                            "model": self._model,
+                                            "timestamp": time.time(),
+                                            "first_token_latency_ms": first_token_latency
+                                        })
+                                        
+                                        # Also emit first token specific event for detailed tracking
+                                        await self._event_emitter.emit("llm_first_token", {
+                                            "model": self._model,
+                                            "timestamp": time.time(),
+                                            "latency_ms": first_token_latency
+                                        })
+                                        
+                                        # Emit first token metrics immediately
                                         await self._event_emitter.emit("metrics_update", {
                                             "stt_latency_ms": 0.0,  # Will be updated by STT service
                                             "llm_latency_ms": first_token_latency,
@@ -195,7 +201,7 @@ class OLLamaLLMService(LLMService):
                                             "timestamp": time.time(),
                                             "component": "llm"
                                         })
-                                        logger.info(f"📊 Emitted LLM first token metrics: {first_token_latency:.1f}ms")
+                                        logger.info(f"📊 Emitted LLM first token events: {first_token_latency:.1f}ms")
                                 
                                 full_response += token
                                 

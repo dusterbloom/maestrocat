@@ -24,7 +24,13 @@ export class StateManager extends EventEmitter {
           tts_latency_ms: 0,
           total_latency_ms: 0
         },
-        history: []
+        history: [],
+        // NEW: Turn-based metrics for developer insights
+        turns: {
+          current: null,
+          history: [],
+          totalTurns: 0
+        }
       },
       modules: {
         memory: { enabled: false, loaded: false },
@@ -183,7 +189,37 @@ export class StateManager extends EventEmitter {
       tts_latency_ms: 0,
       total_latency_ms: 0
     };
+    // Also clear turn metrics
+    this.state.metrics.turns = {
+      current: null,
+      history: [],
+      totalTurns: 0
+    };
     this.emit('metrics:cleared');
+  }
+
+  // NEW: Turn-based metrics methods
+  updateTurnMetrics(turnData) {
+    this.state.metrics.turns.current = turnData;
+    this.state.metrics.turns.totalTurns = turnData.turn_id;
+    
+    // Add to turn history
+    this.state.metrics.turns.history.push({
+      timestamp: Date.now(),
+      ...turnData
+    });
+    
+    // Keep only last 50 turns
+    if (this.state.metrics.turns.history.length > 50) {
+      this.state.metrics.turns.history.shift();
+    }
+    
+    this.emit('turn:completed', turnData);
+  }
+
+  getTurnHistory(limit = 50) {
+    const history = this.state.metrics.turns.history;
+    return history.slice(-limit);
   }
   
   // Module methods

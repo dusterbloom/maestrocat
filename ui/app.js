@@ -143,6 +143,13 @@ class MaestroCatDebugApp {
         this.metrics.update(event.data);
         break;
         
+      case 'turn_metrics':
+        // NEW: Handle turn-based metrics for developer insights
+        this.state.updateTurnMetrics(event.data);
+        this.ui.updateTurnMetrics(event.data);
+        this.ui.showToast(`Turn ${event.data.turn_id} completed: ${Math.round(event.data.total_latency_ms)}ms total`, 'info');
+        break;
+        
       case 'module_loaded':
       case 'module_unloaded':
         this.ui.updateModuleStatus(event.data.name, event.type === 'module_loaded');

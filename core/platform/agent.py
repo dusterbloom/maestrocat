@@ -27,6 +27,7 @@ from ..processors import (
     EventEmitter,
     ModuleLoader
 )
+from ..processors.turn_metrics_tracker import TurnMetricsTracker
 # Removed complex metrics aggregator for now
 from .config import UnifiedMaestroCatConfig
 from ..modules import VoiceRecognitionModule, MemoryModule
@@ -79,6 +80,7 @@ class MaestroCatAgent:
         # Core components
         self.event_emitter = None
         self.metrics_collector = None
+        self.turn_metrics_tracker = None
         self.module_loader = None
         self.debug_ui = None
         self.interruption_handler = None
@@ -166,6 +168,11 @@ class MaestroCatAgent:
         # Keep the existing simple metrics collector for now
         self.metrics_collector = MetricsCollector(
             emit_interval=5.0,
+            event_emitter=self.event_emitter
+        )
+        
+        # NEW: Create turn-based metrics tracker for developers
+        self.turn_metrics_tracker = TurnMetricsTracker(
             event_emitter=self.event_emitter
         )
         
@@ -260,6 +267,9 @@ class MaestroCatAgent:
         pipeline = Pipeline([
             # Input
             transport.input(),
+            
+            # NEW: Turn metrics tracker (monitors user speaking frames)
+            self.turn_metrics_tracker,
             
             # STT
             self.stt,
