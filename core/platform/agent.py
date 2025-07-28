@@ -197,6 +197,12 @@ class MaestroCatAgent:
         logger.info(f"✅ STT: {type(self.stt).__name__}")
         logger.info(f"✅ LLM: {type(self.llm).__name__}")
         logger.info(f"✅ TTS: {type(self.tts).__name__}")
+        
+        # Pre-load LLM model for instant responses
+        if hasattr(self.llm, '_preload_model'):
+            logger.info("🚀 Pre-loading LLM model for instant responses...")
+            await self.llm._preload_model()
+            logger.info("✅ LLM model pre-loaded and ready")
     
     async def _load_modules(self):
         """Load configured modules"""
