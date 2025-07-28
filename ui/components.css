@@ -359,6 +359,28 @@
   color: var(--color-gray-300);
 }
 
+/* Small toggle for inline use */
+.config-label .toggle-switch {
+  width: 24px;
+  height: 14px;
+  margin-left: var(--space-2);
+}
+
+.config-label .toggle-switch .toggle-slider {
+  border-radius: 14px;
+}
+
+.config-label .toggle-switch .toggle-slider:before {
+  height: 10px;
+  width: 10px;
+  left: 2px;
+  bottom: 2px;
+}
+
+.config-label .toggle-switch input:checked + .toggle-slider:before {
+  transform: translateX(10px);
+}
+
 .config-value {
   font-family: var(--font-mono);
   font-size: var(--font-size-sm);

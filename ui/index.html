@@ -142,6 +142,7 @@
                             <option value="default">Default</option>
                             <option value="low-latency">Low Latency</option>
                             <option value="high-quality">High Quality</option>
+                            <option value="italian">Italian</option>
                             <option value="custom">Custom</option>
                         </select>
                     </div>
@@ -189,14 +190,6 @@
                         <div class="config-section">
                             <h3 class="config-section-title">Text-to-Speech</h3>
                             <div class="config-group">
-                                <label class="config-label" for="tts-voice">Voice</label>
-                                <select class="config-select" id="tts-voice">
-                                    <option value="af_bella">af_bella</option>
-                                    <option value="af_sky">af_sky</option>
-                                    <option value="am_michael">am_michael</option>
-                                </select>
-                            </div>
-                            <div class="config-group">
                                 <label class="config-label" for="tts-speed">
                                     Speed
                                     <span class="config-value" id="tts-speed-value">1.0</span>
@@ -206,18 +199,38 @@
                             </div>
                         </div>
 
-                        <!-- STT Configuration -->
+                        <!-- Language & Voice Configuration -->
                         <div class="config-section">
-                            <h3 class="config-section-title">Speech-to-Text</h3>
+                            <h3 class="config-section-title">Language & Voice</h3>
                             <div class="config-group">
-                                <label class="config-label" for="stt-language">Language</label>
-                                <select class="config-select" id="stt-language">
+                                <label class="config-label" for="user-language">Your Language</label>
+                                <select class="config-select" id="user-language">
                                     <option value="en">English</option>
-                                    <option value="es">Spanish</option>
+                                    <option value="it">Italian</option>
                                     <option value="fr">French</option>
-                                    <option value="auto">Auto-detect</option>
+                                    <option value="es">Spanish</option>
+                                    <option value="pt">Portuguese</option>
+                                    <option value="ja">Japanese</option>
+                                    <option value="zh">Chinese</option>
                                 </select>
                             </div>
+                            <div class="config-group">
+                                <div class="config-label">
+                                    <span id="voice-label">Voice</span>
+                                    <label class="toggle-switch" title="Show all voices regardless of language">
+                                        <input type="checkbox" id="show-all-voices">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <select class="config-select" id="tts-voice">
+                                    <!-- Will be populated by JavaScript -->
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Voice Configuration -->
+                        <div class="config-section">
+                            <h3 class="config-section-title">Voice Settings</h3>
                             <div class="config-group">
                                 <label class="config-label" for="vad-threshold">
                                     VAD Threshold

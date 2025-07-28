@@ -313,17 +313,10 @@ class MacOSPlatformStrategy(PlatformStrategy):
                 
                 model = model_mapping.get(model_size, MLXModel.MEDIUM)
                 
-                # Convert string language to Language enum
+                # Always use auto-detect (None) for multilingual support
+                # This allows Whisper to detect any language and transcribe it properly
                 lang_enum = None
-                if language and language != 'auto':
-                    try:
-                        # Language enum expects uppercase values like "EN", "ES", etc.
-                        lang_enum = getattr(Language, language.upper(), None)
-                        if lang_enum is None:
-                            logger.warning(f"Invalid language '{language}', using auto-detect")
-                    except (AttributeError, ValueError):
-                        logger.warning(f"Invalid language '{language}', using auto-detect")
-                        lang_enum = None
+                logger.info("🌍 Using auto-detect mode for multilingual transcription")
                 
                 return MLXWhisperPreloadSTTService(
                     model=model,

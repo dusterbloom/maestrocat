@@ -27,6 +27,7 @@ from ..processors import (
     EventEmitter,
     ModuleLoader
 )
+from ..processors.language_handler import LanguageHandler
 from ..processors.turn_metrics_tracker import TurnMetricsTracker
 # Removed complex metrics aggregator for now
 from .config import UnifiedMaestroCatConfig
@@ -270,6 +271,9 @@ class MaestroCatAgent:
         
         # Create context aggregators using the LLM service
         context_aggregator = self.llm.create_context_aggregator(context)
+        
+        # Create language handler for dynamic language updates
+        language_handler = LanguageHandler(context, self.event_emitter)
         
         # Build the pipeline
         pipeline = Pipeline([

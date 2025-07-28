@@ -125,6 +125,8 @@ class MaestroCatDebugApp {
         
       case 'transcription_final':
         this.ui.addMessage('user', event.data.text);
+        // Try to auto-detect language change from user transcription
+        this.config.autoDetectLanguageFromTranscription(event.data.text);
         break;
         
       case 'llm_response_start':
@@ -137,6 +139,8 @@ class MaestroCatDebugApp {
         
       case 'llm_response_complete':
         this.ui.finalizeAssistantMessage(event.data.text);
+        // Try to auto-detect language change from LLM response
+        this.config.autoDetectLanguageFromResponse(event.data.text);
         break;
         
       case 'metrics_update':
@@ -157,6 +161,27 @@ class MaestroCatDebugApp {
         
       case 'error':
         this.ui.showToast(`Error: ${event.data.message}`, 'error');
+        break;
+        
+      case 'tts_voice_changed':
+        // Handle voice change confirmation from TTS service
+        const voiceData = event.data;
+        if (voiceData.success) {
+          const status = voiceData.status === 'exact_match' ? 'exact match' : `mapped to ${voiceData.mapped_voice}`;
+          this.ui.showToast(`Voice changed to ${voiceData.new_voice} (${status})`, 'success');
+          console.log(`🎯 Voice successfully changed: ${voiceData.old_voice} -> ${voiceData.new_voice}`);
+        } else {
+          this.ui.showToast(`Voice change failed: ${voiceData.error}`, 'error');
+          console.error(`❌ Voice change failed: ${voiceData.old_voice} -> ${voiceData.new_voice}: ${voiceData.error}`);
+        }
+        break;
+        
+      case 'tts_voices_discovered':
+        // Handle discovered voices from TTS service
+        const voicesData = event.data;
+        console.log(`🎤 TTS discovered ${voicesData.total_count} voices:`, voicesData.voices);
+        this.config.updateAvailableVoices(voicesData.voices);
+        this.ui.showToast(`Discovered ${voicesData.total_count} available voices`, 'info');
         break;
         
       case 'interruption_detected':

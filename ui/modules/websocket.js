@@ -109,11 +109,22 @@ export class WebSocketManager extends EventEmitter {
   }
   
   sendConfigUpdate(component, settings) {
-    return this.send({
+    const message = {
       type: 'config_update',
       component,
       settings
-    });
+    };
+    
+    console.log(`📡 Sending config update via WebSocket:`, message);
+    const result = this.send(message);
+    
+    if (!result) {
+      console.error(`❌ Failed to send config update for ${component}:`, settings);
+    } else {
+      console.log(`✅ Config update sent successfully for ${component}`);
+    }
+    
+    return result;
   }
   
   sendCommand(command, params = {}) {

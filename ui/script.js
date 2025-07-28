@@ -134,7 +134,7 @@ class MaestroCatDebugUI {
       
       if (state.config.tts) {
         const ttsConfig = state.config.tts;
-        document.getElementById('tts-voice').value = ttsConfig.voice || 'af_bella';
+        // Voice configuration now handled by ConfigManager
         document.getElementById('tts-speed').value = ttsConfig.speed || 1.0;
         document.getElementById('tts-speed-value').textContent = ttsConfig.speed || 1.0;
       }
@@ -192,9 +192,7 @@ class MaestroCatDebugUI {
       this.sendConfigUpdate('tts', { speed: value });
     });
     
-    document.getElementById('tts-voice').addEventListener('change', (e) => {
-      this.sendConfigUpdate('tts', { voice: e.target.value });
-    });
+    // Voice selection now handled by ConfigManager in app.js
     
     // Module Toggles
     document.getElementById('module-voice-recognition-toggle').addEventListener('change', (e) => {

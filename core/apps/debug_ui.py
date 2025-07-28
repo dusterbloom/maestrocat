@@ -83,6 +83,7 @@ class DebugUIServer:
     def attach_event_emitter(self, event_emitter: EventEmitter):
         """Attach to pipeline's event emitter"""
         self.event_emitter = event_emitter
+        logger.info(f"✅ Debug UI attached event emitter: {self.event_emitter}")
         
         # Subscribe to all events
         self.event_emitter.subscribe("*", self._handle_event)
@@ -93,7 +94,7 @@ class DebugUIServer:
         
     async def _handle_event(self, event: dict):
         """Handle events from the pipeline"""
-        logger.info(f"🔔 Debug UI received event: {event['type']} - {event.get('data', {})}")
+        # logger.info(f"🔔 Debug UI received event: {event['type']} - {event.get('data', {})}")
         
         # Store in history
         self.event_history.append(event)
@@ -130,6 +131,10 @@ class DebugUIServer:
         
     async def start(self):
         """Start the debug UI server"""
+        global debug_server
+        debug_server = self  # Set global reference to this instance
+        logger.info(f"🔧 Debug server global reference set: {debug_server}")
+        
         config = uvicorn.Config(
             app,
             host="0.0.0.0",
@@ -140,9 +145,8 @@ class DebugUIServer:
         await server.serve()
 
 
-# Global instance
-
-debug_server = DebugUIServer()
+# Global instance - will be replaced by the actual instance
+debug_server = None
 
 
 @app.get("/")
@@ -184,6 +188,17 @@ async def websocket_endpoint(websocket: WebSocket):
                 component = data.get("component")
                 settings = data.get("settings")
                 
+                logger.info(f"📡 WebSocket config update received: {component} = {settings}")
+                
+                # Check if debug server is available
+                if debug_server is None:
+                    logger.error(f"❌ FATAL: Debug server is None!")
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Debug server not initialized"
+                    })
+                    continue
+                
                 # Emit configuration change event
                 if debug_server.event_emitter:
                     await debug_server.event_emitter.emit(
@@ -193,6 +208,17 @@ async def websocket_endpoint(websocket: WebSocket):
                             "settings": settings
                         }
                     )
+                    logger.info(f"✅ Config change event emitted for {component}")
+                else:
+                    logger.error(f"❌ CRITICAL: No event emitter available for config change: {component}")
+                    logger.error(f"❌ This means voice/language changes will NOT work!")
+                    logger.error(f"❌ Debug server event emitter: {debug_server.event_emitter}")
+                    
+                    # Send error back to UI
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": f"Config update failed - no event emitter for {component}"
+                    })
                     
             elif message_type == "command":
                 # Handle command execution
