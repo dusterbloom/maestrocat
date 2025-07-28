@@ -36,7 +36,7 @@ class UnifiedSTTConfig:
     translate: bool = False
     
     # Platform-specific settings (will be populated based on platform)
-    service: str = "auto"  # "whisperlive", "mlx_whisper", "whispercpp", "auto"
+    service: str = "auto"  # "whisperlive", "mlx_whisper", "whispercpp", "lightning_whisper_mlx", "auto"
     host: str = "localhost"
     port: int = 9090
     model: str = "small"
@@ -44,6 +44,11 @@ class UnifiedSTTConfig:
     sample_rate: int = 16000
     use_vad: bool = False
     vad_threshold: float = 0.5
+    
+    # Lightning Whisper MLX specific settings
+    compute_type: str = "float16"  # float16, int8, int4
+    batch_size: int = 1
+    beam_size: int = 1
 
 
 @dataclass

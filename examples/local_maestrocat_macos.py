@@ -135,7 +135,7 @@ class MacOSMaestroCatAgent:
             "distil-large-v3": MLXModel.DISTIL_LARGE_V3
         }
         
-        model = model_mapping.get(stt_config.model_size, MLXModel.TINY)  # Default to TINY for speed
+        model = model_mapping.get(stt_config.model_size, MLXModel.MEDIUM)  # Default to DISTIL_LARGE_V3 for quality
         
         self.stt = WhisperSTTServiceMLX(
             model=model,
@@ -264,6 +264,9 @@ class MacOSMaestroCatAgent:
             
             # STT
             self.stt,
+            
+            # Metrics collection (track performance across all components)
+            self.metrics_collector,
             
             # User context aggregation (TranscriptionFrame → LLM trigger)
             context_aggregator.user(),

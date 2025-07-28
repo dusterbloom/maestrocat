@@ -92,7 +92,7 @@ class DockerPlatformStrategy(PlatformStrategy):
             capabilities=capabilities,
             description=description,
             recommended_models={
-                "stt": "small" if self._gpu_available else "tiny",
+                "stt": "medium" if self._gpu_available else "base",
                 "llm": "llama3.2:3b" if self._gpu_available else "llama3.2:1b",
                 "tts": "af_bella"
             }

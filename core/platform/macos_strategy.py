@@ -70,13 +70,13 @@ class MacOSPlatformStrategy(PlatformStrategy):
         # WhisperCpp native performance is excellent across all Apple Silicon
         if self._mlx_available:  # Apple Silicon detected
             recommended_models = {
-                "stt": "base",  # WhisperCpp native is fast enough for base model
+                "stt": "distil-large-v3",  # WhisperCpp native is fast enough for base model
                 "llm": "llama3.2:3b",  # Good balance for Apple Silicon
                 "tts": "af_bella"
             }
         else:  # Intel Mac
             recommended_models = {
-                "stt": "tiny",  # Conservative for Intel Macs
+                "stt": "base",  # Conservative for Intel Macs
                 "llm": "llama3.2:1b",  # Smaller model for older hardware
                 "tts": "Samantha"  # macOS system voice
             }
@@ -100,12 +100,21 @@ class MacOSPlatformStrategy(PlatformStrategy):
         else:
             tts_class = "MacOSTTSService"
         
+        # Determine STT service based on config
+        stt_service = getattr(self.config.stt, 'service', 'whispercpp')
+        if stt_service == 'lightning_whisper_mlx':
+            stt_class = "LightningWhisperMLXService"
+        elif stt_service == 'mlx_whisper':
+            stt_class = "WhisperCppSTTService"  # Use WhisperCpp as implementation for now
+        else:
+            stt_class = "WhisperCppSTTService"
+        
         return ServiceSpecs(
-            stt_service="WhisperCppSTTService",
+            stt_service=stt_class,
             llm_service="OLLamaLLMService",
             tts_service=tts_class,
             transport_class="FastAPIWebsocketTransport",
-            additional_processors=["MetricsCollector", "EventEmitter", "TranscriptionEventProcessor"]
+            additional_processors=["EventEmitter", "TranscriptionEventProcessor"]
         )
     
     def _check_mlx_availability(self) -> bool:
@@ -248,18 +257,78 @@ class MacOSPlatformStrategy(PlatformStrategy):
             return False
     
     async def create_stt_service(self, event_emitter=None):
-        """Create WhisperCpp STT service"""
+        """Create STT service based on configuration"""
         stt_config = self.config.stt
+        service_type = getattr(stt_config, 'service', 'whispercpp')
         
         model_size = getattr(stt_config, 'model_size', 'base')
         language = getattr(stt_config, 'language', 'en')
         if language == 'auto':
             language = 'en'  # Default to English for auto detection
         
-        logger.info(f"Creating WhisperCpp STT with model: {model_size}")
+        # Lightning Whisper MLX for M4 optimization (5-10x faster)
+        if service_type == 'lightning_whisper_mlx':
+            try:
+                from ..services.lightning_whisper_mlx_stt import LightningWhisperMLXService
+                logger.info(f"🚀 Creating Lightning Whisper MLX with model: {model_size}")
+                logger.info("⚡ Using Apple M4 optimized Lightning MLX for 5-10x faster transcription")
+                
+                return LightningWhisperMLXService(
+                    model=model_size,
+                    language=language,
+                    compute_type=getattr(stt_config, 'compute_type', 'float16'),
+                    batch_size=getattr(stt_config, 'batch_size', 1),
+                    beam_size=getattr(stt_config, 'beam_size', 1),
+                    vad_filter=getattr(stt_config, 'use_vad', True),
+                    vad_threshold=getattr(stt_config, 'vad_threshold', 0.5),
+                    event_emitter=event_emitter
+                )
+            except ImportError as e:
+                logger.warning(f"Lightning Whisper MLX not available: {e}")
+                logger.info("Falling back to WhisperCpp")
+                service_type = 'whispercpp'
+        
+        # Standard MLX Whisper (2-4x faster than whisper.cpp)
+        elif service_type == 'mlx_whisper':
+            try:
+                from pipecat.services.whisper.stt import WhisperSTTServiceMLX, MLXModel
+                logger.info(f"Creating MLX Whisper with model: {model_size}")
+                
+                # Map model sizes to MLXModel enum
+                model_mapping = {
+                    "tiny": MLXModel.TINY,
+                    "base": MLXModel.MEDIUM,
+                    "small": MLXModel.MEDIUM,
+                    "medium": MLXModel.MEDIUM,
+                    "large": MLXModel.LARGE_V3,
+                    "large-v3": MLXModel.LARGE_V3,
+                    "distil-large-v3": MLXModel.DISTIL_LARGE_V3
+                }
+                
+                model = model_mapping.get(model_size, MLXModel.MEDIUM)
+                
+                return WhisperSTTServiceMLX(
+                    model=model,
+                    language=language if language != 'auto' else None
+                )
+            except ImportError:
+                logger.warning("MLX Whisper not available, falling back to WhisperCpp")
+                service_type = 'whispercpp'
+        
+        # Default: WhisperCpp (still fast, but not as optimized as MLX)
+        # Map unsupported models to WhisperCpp equivalents
+        whispercpp_model_mapping = {
+            "distil-large-v3": "large",  # Use large-v3 as fallback
+            "large-v3": "large",
+            "distil-medium": "medium",
+            "distil-small": "small"
+        }
+        
+        whispercpp_model = whispercpp_model_mapping.get(model_size, model_size)
+        logger.info(f"Creating WhisperCpp STT with model: {whispercpp_model}")
         
         return WhisperCppSTTService(
-            model_size=model_size,
+            model_size=whispercpp_model,
             language=language,
             translate=getattr(stt_config, 'translate', False),
             use_vad=getattr(stt_config, 'use_vad', True),

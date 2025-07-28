@@ -120,6 +120,9 @@ class OLLamaLLMService(LLMService):
         # Ensure model is pre-loaded
         await self._preload_model()
         
+        # Start timing
+        llm_start_time = time.time()
+        
         try:
             # Prepare request
             messages = context.get_messages()
@@ -160,6 +163,7 @@ class OLLamaLLMService(LLMService):
                 response.raise_for_status()
                 
                 full_response = ""
+                first_token_received = False
                 
                 async for line in response.aiter_lines():
                     if not line:
@@ -176,6 +180,23 @@ class OLLamaLLMService(LLMService):
                         if "message" in data and "content" in data["message"]:
                             token = data["message"]["content"]
                             if token:
+                                # Measure first token latency (key voice agent metric)
+                                if not first_token_received:
+                                    first_token_latency = (time.time() - llm_start_time) * 1000
+                                    first_token_received = True
+                                    
+                                    # Emit first token metrics immediately
+                                    if self._event_emitter:
+                                        await self._event_emitter.emit("metrics_update", {
+                                            "stt_latency_ms": 0.0,  # Will be updated by STT service
+                                            "llm_latency_ms": first_token_latency,
+                                            "tts_latency_ms": 0.0,  # Will be updated by TTS service
+                                            "total_latency_ms": first_token_latency,
+                                            "timestamp": time.time(),
+                                            "component": "llm"
+                                        })
+                                        logger.info(f"📊 Emitted LLM first token metrics: {first_token_latency:.1f}ms")
+                                
                                 full_response += token
                                 
                                 # Emit chunk event for debug UI

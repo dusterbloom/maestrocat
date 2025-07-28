@@ -27,3 +27,4 @@ maestrocat.egg-info/
 
 __pycache__/
 docs/llmstxt/
+mlx_models/

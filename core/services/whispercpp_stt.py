@@ -65,6 +65,9 @@ class WhisperCppSTTService(STTService):
         # Download model if needed
         self._ensure_model()
         
+        # Store timing information
+        self._last_stt_latency = 0.0
+        
     def _find_whisper_binary(self) -> Optional[str]:
         """Find whisper.cpp binary in common locations"""
         # Check common binary names (whisper-cli is the new name)
@@ -240,12 +243,18 @@ class WhisperCppSTTService(STTService):
                 cmd.extend(["--vad-threshold", str(self._vad_threshold)])
                 
             logger.info(f"Running whisper.cpp command: {' '.join(cmd)}")
+            start_time = time.time()
             result = subprocess.run(cmd, capture_output=True, text=True)
+            stt_latency = (time.time() - start_time) * 1000  # Convert to milliseconds
             
             # Clean up temp file
             os.unlink(temp_path)
             
             logger.info(f"Whisper.cpp exit code: {result.returncode}")
+            logger.info(f"STT processing time: {stt_latency:.1f}ms")
+            
+            # Store timing for metrics
+            self._last_stt_latency = stt_latency
             if result.stderr:
                 logger.warning(f"Whisper.cpp stderr: {result.stderr}")
             if result.stdout:
@@ -324,6 +333,17 @@ class WhisperCppSTTService(STTService):
                 "timestamp": time.time(),
                 "user_id": "user"
             })
+            
+            # Emit timing metrics for Performance panel
+            await self._event_emitter.emit("metrics_update", {
+                "stt_latency_ms": self._last_stt_latency,
+                "llm_latency_ms": 0.0,  # Will be updated by LLM service
+                "tts_latency_ms": 0.0,  # Will be updated by TTS service
+                "total_latency_ms": self._last_stt_latency,
+                "timestamp": time.time(),
+                "component": "stt"
+            })
+            logger.info(f"📊 Emitted STT metrics: {self._last_stt_latency:.1f}ms")
         else:
             logger.warning("⚠️ No event emitter available for transcription events")
         

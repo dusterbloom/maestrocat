@@ -17,6 +17,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask, PipelineParams
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+# Removed turn tracking observer for now
 
 from .strategy import PlatformStrategy, PlatformType
 from .factory import ServiceFactory
@@ -26,6 +27,7 @@ from ..processors import (
     EventEmitter,
     ModuleLoader
 )
+# Removed complex metrics aggregator for now
 from .config import UnifiedMaestroCatConfig
 from ..modules import VoiceRecognitionModule, MemoryModule
 from ..apps.debug_ui import DebugUIServer
@@ -161,7 +163,7 @@ class MaestroCatAgent:
             emit_as_frames=False
         )
         
-        # Create metrics collector
+        # Keep the existing simple metrics collector for now
         self.metrics_collector = MetricsCollector(
             emit_interval=5.0,
             event_emitter=self.event_emitter
@@ -294,6 +296,7 @@ class MaestroCatAgent:
         )
         
         task = PipelineTask(pipeline, params=task_params)
+        
         runner = PipelineRunner()
         
         logger.info(f"WebSocket connected: {websocket.client}")

@@ -145,6 +145,9 @@ class NativeKokoroTTSService(TTSService):
             
         logger.debug(f"Generating TTS for: '{text[:50]}{'...' if len(text) > 50 else ''}'")
         
+        # Start timing
+        tts_start_time = time.time()
+        
         # Emit TTS start event
         if self._event_emitter:
             await self._event_emitter.emit("tts_audio_start", {
@@ -162,6 +165,21 @@ class NativeKokoroTTSService(TTSService):
                 self._generate_audio_sync,
                 text
             )
+            
+            # Calculate TTS latency to audio ready (not generation complete)
+            tts_latency = (time.time() - tts_start_time) * 1000  # Convert to milliseconds
+            
+            # Emit timing metrics immediately when audio is ready to play
+            if self._event_emitter:
+                await self._event_emitter.emit("metrics_update", {
+                    "stt_latency_ms": 0.0,  # Will be updated by STT service
+                    "llm_latency_ms": 0.0,  # Will be updated by LLM service
+                    "tts_latency_ms": tts_latency,
+                    "total_latency_ms": tts_latency,
+                    "timestamp": time.time(),
+                    "component": "tts"
+                })
+                logger.info(f"📊 Emitted TTS metrics: {tts_latency:.1f}ms")
             
             if result is not None:
                 audio_data, actual_sample_rate = result

@@ -14,5 +14,9 @@ pyaudio>=0.2.11  # For WhisperLive
 prometheus-client>=0.18.0  # For metrics
 psutil>=5.9.0  # For system monitoring
 
-# Add for macOS support     
-# pipecat-ai[mlx-whisper]
+# macOS Apple Silicon optimizations
+lightning-whisper-mlx
+mlx-whisper>=0.4.0  # Lightning-fast Whisper for M4
+huggingface_hub>=0.19.0  # For model downloads
+# pipecat-ai[mlx-whisper]  # Optional: if using pipecat's MLX integration
+

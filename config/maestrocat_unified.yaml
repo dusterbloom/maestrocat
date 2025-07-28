@@ -92,9 +92,12 @@ platforms:
   # macOS native platform configuration  
   macos_native:
     stt:
-      service: "mlx_whisper"
-      model_size: "base"  # MLX can handle base model well
+      service: "mlx_whisper"             # Standard MLX Whisper for real-time performance
+      model_size: "distil-large-v3"      # Best accuracy/speed balance  
       sample_rate: 16000
+      compute_type: "float16"            # Options: float16, int8, int4
+      batch_size: 1                      # Increase for batch processing
+      beam_size: 1                       # 1 for fastest, 5 for better accuracy
     
     llm:
       base_url: "http://localhost:11434"
@@ -170,7 +173,7 @@ platforms:
       model: "llama3.2:1b"  # Smaller model for WSL performance
     
     stt:
-      model: "tiny"  # Fastest model for WSL
+      model: "medium"  # Fastest model for WSL
 
   # Windows platform configuration (extends Docker)
   windows:
@@ -205,7 +208,7 @@ production:
   # Docker production settings
   docker:
     stt:
-      model: "tiny"  # Fastest for production
+      model: "distil-large-v3"  # Fastest for production
     llm:
       model: "llama3.2:1b"
       max_tokens: 100
@@ -215,13 +218,17 @@ production:
   # macOS production settings
   macos_native:
     stt:
-      model_size: "tiny"
+      service: "lightning_whisper_mlx"
+      model_size: "distil-large-v3"
+      compute_type: "int8"  # Quantized for max speed
+      beam_size: 1         # Greedy search for speed
     llm:
       model: "llama3.2:1b" 
       max_tokens: 100
     macos:
       performance:
         mlx_optimization: true
+        lightning_mlx: true  # Enable Lightning MLX optimizations
 
 # Advanced configuration
 advanced:
