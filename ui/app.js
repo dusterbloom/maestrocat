@@ -3,7 +3,6 @@
 import { WebSocketManager } from './modules/websocket.js';
 import { AudioManager } from './modules/audio.js';
 import { UIManager } from './modules/ui.js';
-import { TranscriptionManager } from './modules/transcription.js';
 import { MetricsManager } from './modules/metrics.js';
 import { ConfigManager } from './modules/config.js';
 import { ShortcutsManager } from './modules/shortcuts.js';
@@ -20,7 +19,6 @@ class MaestroCatDebugApp {
     this.websocket = new WebSocketManager(this.state);
     this.audio = new AudioManager(this.state);
     this.ui = new UIManager(this.state);
-    this.transcription = new TranscriptionManager(this.state);
     this.metrics = new MetricsManager(this.state);
     this.config = new ConfigManager(this.state);
     this.shortcuts = new ShortcutsManager(this.state);
@@ -53,12 +51,10 @@ class MaestroCatDebugApp {
     // Audio events
     this.audio.on('connected', () => {
       this.ui.updateConnectionStatus('pipeline', true);
-      this.transcription.setLive(true);
     });
     
     this.audio.on('disconnected', () => {
       this.ui.updateConnectionStatus('pipeline', false);
-      this.transcription.setLive(false);
     });
     
     this.audio.on('audio_data', (data) => {
@@ -111,11 +107,10 @@ class MaestroCatDebugApp {
     // Handle specific event types
     switch(event.type) {
       case 'transcription_partial':
-        this.transcription.updatePartial(event.data);
+        // No longer displaying partial transcriptions
         break;
         
       case 'transcription_final':
-        this.transcription.finalize(event.data);
         this.ui.addMessage('user', event.data.text);
         break;
         
@@ -145,7 +140,6 @@ class MaestroCatDebugApp {
         break;
         
       case 'interruption_detected':
-        this.transcription.handleInterruption();
         this.audio.stopAllAudio();
         break;
     }
@@ -258,7 +252,6 @@ class MaestroCatDebugApp {
     await this.shortcuts.init();
     await this.commandPalette.init();
     await this.events.init();
-    await this.transcription.init();
     await this.metrics.init();
     
     // Connect to WebSocket

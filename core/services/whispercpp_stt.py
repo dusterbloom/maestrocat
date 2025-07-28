@@ -316,7 +316,9 @@ class WhisperCppSTTService(STTService):
         # Emit transcription event for debug UI
         if self._event_emitter:
             logger.info(f"📤 Emitting transcription event: '{text}'")
+            transcript_id = f"transcript_{int(time.time() * 1000)}"
             await self._event_emitter.emit("transcription_final", {
+                "transcript_id": transcript_id,
                 "text": text,
                 "confidence": 1.0,  # Whisper.cpp doesn't provide confidence
                 "timestamp": time.time(),

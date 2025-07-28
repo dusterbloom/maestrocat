@@ -93,6 +93,8 @@ class DebugUIServer:
         
     async def _handle_event(self, event: dict):
         """Handle events from the pipeline"""
+        logger.info(f"🔔 Debug UI received event: {event['type']} - {event.get('data', {})}")
+        
         # Store in history
         self.event_history.append(event)
         if len(self.event_history) > 1000:
