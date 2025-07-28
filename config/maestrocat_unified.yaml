@@ -93,7 +93,7 @@ platforms:
   macos_native:
     stt:
       service: "mlx_whisper"             # Standard MLX Whisper for real-time performance
-      model_size: "medium"      # Using medium for faster STT processing (testing turn metrics)  
+      model_size: "small"      # Using medium for faster STT processing (testing turn metrics)  
       sample_rate: 16000
       compute_type: "float16"            # Options: float16, int8, int4
       batch_size: 1                      # Increase for batch processing

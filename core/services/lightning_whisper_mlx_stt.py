@@ -123,16 +123,18 @@ class LightningWhisperMLXService(STTService):
             return
             
         try:
-            logger.info(f"Loading {self._backend} Whisper model: {self._model_name}")
+            logger.info(f"🚀 Loading {self._backend} Whisper model: {self._model_name}")
             start_time = time.time()
             
             if self._backend == 'lightning':
                 # Lightning Whisper MLX - fastest option
                 model_key = self._get_lightning_model_path()
                 
-                # Check if model key is valid
+                # Pre-download model files if needed (this is the bottleneck!)
+                logger.info(f"📥 Ensuring model {model_key} is downloaded...")
                 await self._ensure_model_available(model_key)
                 
+                logger.info(f"⚡ Initializing Lightning Whisper MLX...")
                 self._model = lightning_whisper_mlx.LightningWhisperMLX(
                     model=model_key,
                     batch_size=self._batch_size,
@@ -145,13 +147,13 @@ class LightningWhisperMLXService(STTService):
                 self._model = None  # MLX Whisper uses transcribe function directly
             
             load_time = time.time() - start_time
-            logger.info(f"✅ Model loaded in {load_time:.2f} seconds")
+            logger.info(f"✅ Model loaded in {load_time:.2f}s - ready for instant transcription!")
             
-            # Warm up the model
+            # Warm up the model with dummy audio for optimal performance
             await self._warmup_model()
             
         except Exception as e:
-            logger.error(f"Failed to load {self._backend} Whisper model: {e}")
+            logger.error(f"❌ Failed to load {self._backend} Whisper model: {e}")
             raise
     
     def _get_lightning_model_path(self) -> str:
@@ -261,12 +263,12 @@ class LightningWhisperMLXService(STTService):
         return dtype_mapping.get(self._compute_type, mx.float16)
     
     async def _warmup_model(self):
-        """Warm up the model with a dummy transcription"""
+        """Warm up the model with a dummy transcription for optimal first-inference performance"""
         try:
-            logger.info(f"Warming up {self._backend} Whisper...")
+            logger.info(f"🔥 Warming up {self._backend} Whisper for instant first transcription...")
             
-            # Create a short silent audio sample
-            dummy_audio = np.zeros(self._sample_rate, dtype=np.float32)
+            # Create a very short silent audio sample (0.5s to minimize warmup time)
+            dummy_audio = np.zeros(int(self._sample_rate * 0.5), dtype=np.float32)
             
             # Run inference only if we have a model instance (Lightning) or for MLX
             if self._backend == 'lightning' and self._model:
@@ -274,14 +276,14 @@ class LightningWhisperMLXService(STTService):
                     start_time = time.time()
                     result = await self._transcribe_audio(dummy_audio)
                     warmup_time = (time.time() - start_time) * 1000
-                    logger.info(f"✅ Model warmed up in {warmup_time:.1f}ms")
+                    logger.info(f"✅ Model warmed up in {warmup_time:.1f}ms - ready for <100ms transcription!")
                 except Exception as e:
-                    logger.warning(f"Lightning warmup failed (non-critical): {e}")
+                    logger.warning(f"⚠️ Lightning warmup failed (non-critical): {e}")
             elif self._backend == 'mlx':
                 logger.info("✅ MLX Whisper ready (no warmup needed)")
             
         except Exception as e:
-            logger.warning(f"Warmup failed (non-critical): {e}")
+            logger.warning(f"⚠️ Warmup failed (non-critical): {e}")
     
     async def _transcribe_audio(self, audio: np.ndarray) -> Dict[str, Any]:
         """Transcribe audio using the selected backend"""

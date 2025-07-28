@@ -288,28 +288,46 @@ class MacOSPlatformStrategy(PlatformStrategy):
                 logger.info("Falling back to WhisperCpp")
                 service_type = 'whispercpp'
         
-        # Standard MLX Whisper (2-4x faster than whisper.cpp)
+        # Standard MLX Whisper with preloading (2-4x faster than whisper.cpp)
         elif service_type == 'mlx_whisper':
             try:
-                from pipecat.services.whisper.stt import WhisperSTTServiceMLX, MLXModel
-                logger.info(f"Creating MLX Whisper with model: {model_size}")
+                from ..services.mlx_whisper_preload_stt import MLXWhisperPreloadSTTService
+                from pipecat.services.whisper.stt import MLXModel
+                from pipecat.transcriptions.language import Language
+                logger.info(f"🚀 Creating preloadable MLX Whisper with model: {model_size}")
+                logger.info("⚡ Using MLX Whisper with model preloading for instant first transcription")
                 
-                # Map model sizes to MLXModel enum
+                # Map model sizes to MLXModel enum (available: TINY, MEDIUM, LARGE_V3, LARGE_V3_TURBO, DISTIL_LARGE_V3, LARGE_V3_TURBO_Q4)
                 model_mapping = {
                     "tiny": MLXModel.TINY,
-                    "base": MLXModel.MEDIUM,
-                    "small": MLXModel.MEDIUM,
+                    "base": MLXModel.MEDIUM,          # Map base to medium (no BASE enum)
+                    "small": MLXModel.MEDIUM,         # Map small to medium (no SMALL enum)  
                     "medium": MLXModel.MEDIUM,
                     "large": MLXModel.LARGE_V3,
                     "large-v3": MLXModel.LARGE_V3,
+                    "large-v3-turbo": MLXModel.LARGE_V3_TURBO,
+                    "large-v3-turbo-q4": MLXModel.LARGE_V3_TURBO_Q4,
                     "distil-large-v3": MLXModel.DISTIL_LARGE_V3
                 }
                 
                 model = model_mapping.get(model_size, MLXModel.MEDIUM)
                 
-                return WhisperSTTServiceMLX(
+                # Convert string language to Language enum
+                lang_enum = None
+                if language and language != 'auto':
+                    try:
+                        # Language enum expects uppercase values like "EN", "ES", etc.
+                        lang_enum = getattr(Language, language.upper(), None)
+                        if lang_enum is None:
+                            logger.warning(f"Invalid language '{language}', using auto-detect")
+                    except (AttributeError, ValueError):
+                        logger.warning(f"Invalid language '{language}', using auto-detect")
+                        lang_enum = None
+                
+                return MLXWhisperPreloadSTTService(
                     model=model,
-                    language=language if language != 'auto' else None
+                    language=lang_enum,
+                    no_speech_prob=getattr(stt_config, 'no_speech_prob', 0.6)
                 )
             except ImportError:
                 logger.warning("MLX Whisper not available, falling back to WhisperCpp")
