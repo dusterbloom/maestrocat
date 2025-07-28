@@ -12,7 +12,7 @@ Key Components:
 - MaestroCatAgent: Unified agent using platform strategies
 """
 
-from .strategy import PlatformStrategy, PlatformInfo
+from .strategy import PlatformStrategy, PlatformInfo, PlatformType
 from .detector import PlatformDetector
 from .factory import ServiceFactory
 from .docker_strategy import DockerPlatformStrategy
@@ -21,7 +21,8 @@ from .agent import MaestroCatAgent
 
 __all__ = [
     'PlatformStrategy',
-    'PlatformInfo', 
+    'PlatformInfo',
+    'PlatformType',
     'PlatformDetector',
     'ServiceFactory',
     'DockerPlatformStrategy',

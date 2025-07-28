@@ -55,6 +55,7 @@ class WhisperCppSTTService(STTService):
         self._running = False
         self._whisper_process = None
         self._min_audio_length = int(0.5 * sample_rate * 2)  # 0.5 seconds of audio
+        self._main_loop = None  # Will be set when service starts
         
         # Whisper.cpp binary path - check common locations
         self._whisper_bin = self._find_whisper_binary()
@@ -149,6 +150,8 @@ class WhisperCppSTTService(STTService):
     async def start(self, frame: SystemFrame):
         """Start the STT service"""
         await super().start(frame)
+        # Store the main event loop for async calls from background thread
+        self._main_loop = asyncio.get_event_loop()
         self._running = True
         self._processing_thread = threading.Thread(target=self._processing_loop)
         self._processing_thread.start()
@@ -190,10 +193,13 @@ class WhisperCppSTTService(STTService):
                 if transcription:
                     logger.info(f"Got transcription: '{transcription}'")
                     # Use asyncio to push the transcription frame
-                    asyncio.run_coroutine_threadsafe(
-                        self._handle_transcription(transcription),
-                        asyncio.get_event_loop()
-                    )
+                    if self._main_loop:
+                        asyncio.run_coroutine_threadsafe(
+                            self._handle_transcription(transcription),
+                            self._main_loop
+                        )
+                    else:
+                        logger.warning("No main loop available, skipping transcription")
                 else:
                     logger.warning("No transcription returned from whisper.cpp")
                     
@@ -220,8 +226,6 @@ class WhisperCppSTTService(STTService):
                 "-f", temp_path,
                 "-l", self._language,
                 "--no-timestamps",
-                "--print-colors", "false",
-                "--print-progress", "false",
                 "--no-prints",  # Only output the transcription
                 "--threads", "4",
                 "--processors", "1"

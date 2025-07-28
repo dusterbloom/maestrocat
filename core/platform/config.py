@@ -203,6 +203,9 @@ class UnifiedMaestroCatConfig:
         # Apply intelligent model selection based on platform capabilities
         self._apply_intelligent_model_selection(merged_llm, platform_config)
         
+        # Clean platform-specific keys that shouldn't be passed to config classes
+        self._clean_platform_specific_keys(merged_tts)
+        
         # Create final configuration objects
         self.stt = UnifiedSTTConfig(**merged_stt)
         self.llm = UnifiedLLMConfig(**merged_llm)
@@ -260,6 +263,10 @@ class UnifiedMaestroCatConfig:
                 if cpu_model:
                     llm_config["model"] = cpu_model
                     logger.info(f"Selected CPU model: {cpu_model}")
+            
+            # Remove the selection keys to avoid passing them to UnifiedLLMConfig
+            llm_config.pop("model_gpu", None)
+            llm_config.pop("model_cpu", None)
         
         elif self._platform_type == PlatformType.MACOS_NATIVE:
             # Select model based on Apple Silicon generation
@@ -292,6 +299,17 @@ class UnifiedMaestroCatConfig:
                             logger.info(f"Selected M1 model: {m1_model}")
                 except Exception:
                     pass  # Fall back to default model
+            
+            # Remove the selection keys to avoid passing them to UnifiedLLMConfig
+            llm_config.pop("model_m1", None)
+            llm_config.pop("model_m2", None)
+            llm_config.pop("model_m3", None)
+    
+    def _clean_platform_specific_keys(self, config: Dict):
+        """Remove platform-specific keys that shouldn't be passed to config classes"""
+        # Remove TTS-specific platform keys
+        config.pop("fallback", None)
+        config.pop("tts_alternatives", None)
     
     @classmethod
     def from_file(cls, 
