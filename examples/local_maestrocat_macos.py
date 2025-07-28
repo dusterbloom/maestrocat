@@ -1,7 +1,7 @@
 # examples/local_maestrocat_macos.py
 """
 MaestroCat agent example for macOS using native services:
-- Pipecat MLX Whisper for STT (optimized for Apple Silicon)
+- WhisperCpp for STT (native C++ implementation, fastest)
 - Native Ollama for LLM  
 - macOS System TTS
 """
@@ -119,7 +119,7 @@ class MacOSMaestroCatAgent:
     async def _create_services(self):
         """Create STT, LLM, and TTS services based on configuration"""
         
-        # Create STT service - Use Pipecat's MLX Whisper (optimized for Apple Silicon)
+        # Create STT service - Use WhisperCpp (native C++ implementation, fastest)
         stt_config = self.config.stt
         logger.info(f"Using Pipecat MLX Whisper STT service with model: {stt_config.model_size}")
         
@@ -346,7 +346,7 @@ class MacOSMaestroCatAgent:
         logger.info(f"🐛 Debug UI: http://localhost:{debug_port}")
         logger.info(f"❤️  Health check: http://localhost:{websocket_port}/health")
         logger.info("")
-        logger.info(f"🎤 STT: {type(self.stt).__name__}")
+        logger.info(f"🎤 STT: {type(self.stt).__name__} (native Whisper.cpp - fastest)")
         logger.info(f"🧠 LLM: {self.config.llm.model} (native Ollama)")
         logger.info(f"🗣️  TTS: {type(self.tts).__name__}")
         logger.info("=" * 60)
@@ -382,12 +382,16 @@ def check_dependencies():
     except:
         missing.append("Ollama not available (install with: brew install ollama)")
     
-    # Check MLX is available (for Apple Silicon Whisper)
+    # Check WhisperCpp binary availability
     try:
-        import mlx
-        logger.info("MLX framework available for Apple Silicon optimization")
-    except ImportError:
-        logger.warning("MLX not available - Whisper will use CPU fallback")
+        import subprocess
+        result = subprocess.run(["which", "whisper-cli"], capture_output=True, text=True)
+        if result.returncode == 0:
+            logger.info("Whisper.cpp binary (whisper-cli) found - optimal STT performance available")
+        else:
+            logger.warning("Whisper.cpp binary not found - install with: brew install whisper-cpp")
+    except Exception:
+        logger.warning("Could not check for Whisper.cpp binary")
     
     # Check macOS say command
     try:
@@ -401,7 +405,7 @@ def check_dependencies():
             logger.error(f"  - {dep}")
         logger.info("\nInstallation commands:")
         logger.info("  brew install ollama")
-        logger.info("  pip install 'pipecat-ai[mlx-whisper]'  # Install MLX Whisper")
+        logger.info("  brew install whisper-cpp  # Install native WhisperCpp (fastest STT)")
         logger.info("  ollama serve  # Start Ollama server")
         logger.info("  ollama pull llama3.2:3b  # Download model")
         return False

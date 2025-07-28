@@ -1,15 +1,42 @@
 #!/usr/bin/env python3
 """
-MaestroCat Universal Launcher
-Automatically detects platform and starts the appropriate agent configuration.
+MaestroCat Universal Launcher (Legacy Compatibility Shim)
+
+This is a compatibility shim that redirects to the new unified platform system.
+The original launcher logic has been moved to maestrocat_unified.py with the
+new platform abstraction system.
+
+For new deployments, please use maestrocat_unified.py directly.
 """
 
-import asyncio
-import platform
-import subprocess
+import warnings
 import sys
 import os
 from pathlib import Path
+
+# Issue deprecation warning
+warnings.warn(
+    "The legacy maestrocat.py launcher is deprecated. "
+    "Please use maestrocat_unified.py which provides the new unified platform system. "
+    "This compatibility shim will be removed in a future version.",
+    DeprecationWarning,
+    stacklevel=2
+)
+
+# Add project root to path
+sys.path.append(str(Path(__file__).parent))
+
+# Import and install backward compatibility layer
+try:
+    from core.platform.migration import install_backward_compatibility
+    install_backward_compatibility()
+except ImportError:
+    pass
+
+# Legacy imports and compatibility
+import asyncio
+import platform
+import subprocess
 
 def detect_platform():
     """Detect the current platform and return the appropriate configuration"""
@@ -431,5 +458,18 @@ Platform Detection:
     return asyncio.run(main())
 
 if __name__ == "__main__":
-    exit_code = cli()
-    sys.exit(exit_code)
+    # Redirect to new unified launcher with compatibility warning
+    print("⚠️  Legacy launcher detected!")
+    print("📄 Redirecting to maestrocat_unified.py...")
+    print("💡 For best experience, use: python maestrocat_unified.py")
+    print("")
+    
+    try:
+        # Import and run new unified launcher
+        from maestrocat_unified import main as unified_main
+        unified_main()
+    except ImportError:
+        # Fallback to legacy implementation if unified launcher not available
+        print("❌ Unified launcher not found, using legacy implementation")
+        exit_code = cli()
+        sys.exit(exit_code)

@@ -7,15 +7,15 @@ vad:
   min_speech_ms: 150     # Faster speech detection
   pause_ms: 500          # Shorter pause for faster response
 
-# WhisperLive STT (Docker, CPU-optimized for macOS)
+# WhisperCpp STT (Native C++ implementation, fastest for macOS)
 stt:
-  service: "whisperlive"  # Uses Docker WhisperLive service
-  host: "localhost"
-  port: 9090
+  service: "whispercpp"   # Uses native Whisper.cpp - FASTEST option for macOS
   model_size: "base"      # Use base for good accuracy/speed balance
   language: "en"          # Language code or "auto" for detection
   translate: false  
   sample_rate: 16000
+  use_vad: true           # Voice Activity Detection
+  vad_threshold: 0.5      # VAD sensitivity
 
 # Native Ollama LLM
 llm:
@@ -83,13 +83,13 @@ macos:
     
   # Performance settings for Apple Silicon
   performance:
-    mlx_whisper: true      # Use MLX acceleration for Whisper
-    ollama_threads: 0      # 0 = auto-detect cores
+    whispercpp_native: true   # Use native Whisper.cpp (fastest)
+    ollama_threads: 0         # 0 = auto-detect cores
     metal_acceleration: true  # Use Metal GPU acceleration where available
     
   # Service installation hints
   dependencies:
-    mlx_whisper: "pip install 'pipecat-ai[mlx-whisper]'"
+    whispercpp: "brew install whisper-cpp"  # Fastest STT for macOS
     ollama: "brew install ollama"
     ffmpeg: "brew install ffmpeg"  # Optional for audio processing
     
@@ -114,4 +114,4 @@ production:
     buffer_size: 512       # Smaller buffer for lower latency
     
   performance:
-    mlx_optimization: true  # Enable MLX optimizations for better performance
+    whispercpp_optimization: true  # Enable native Whisper.cpp optimizations

@@ -1,0 +1,243 @@
+# MaestroCat Unified Configuration
+# This configuration works across all platforms with platform-specific sections
+
+# Core VAD settings (used by all platforms)
+vad:
+  energy_threshold: 0.5
+  min_speech_ms: 200
+  pause_ms: 600
+
+# Base STT configuration
+stt:
+  language: "en"
+  translate: false
+
+# Base LLM configuration  
+llm:
+  model: "llama3.2:3b"
+  temperature: 0.7
+  max_tokens: 150
+  top_p: 0.9
+  top_k: 40
+  system_prompt: |
+    You are MaestroCat, a helpful AI voice assistant. 
+    Keep responses brief and conversational for real-time voice interaction.
+    If interrupted, acknowledge it naturally and continue.
+
+# Base TTS configuration
+tts:
+  voice: "af_bella"
+  speed: 1.0
+
+# Interruption handling (universal)
+interruption:
+  threshold: 0.2
+  ack_delay: 0.05
+
+# Module configuration (universal)
+modules:
+  voice_recognition:
+    enabled: false
+    model: "speechbrain/spkrec-ecapa-voxceleb"
+  memory:
+    enabled: false
+    max_history: 100
+
+# Development settings (universal)
+development:
+  log_level: "INFO"
+  debug_ui: true
+  debug_port: 8080
+  websocket_port: 8765
+
+# Platform-specific configurations
+platforms:
+  # Docker platform configuration
+  docker:
+    stt:
+      service: "whisperlive"
+      host: "localhost" 
+      port: 9090
+      model: "small"
+      sample_rate: 16000
+      use_vad: false
+    
+    llm:
+      base_url: "http://localhost:11434"
+      # Override model for GPU vs CPU
+      model_gpu: "llama3.2:3b"
+      model_cpu: "llama3.2:1b"
+    
+    tts:
+      service: "kokoro"
+      base_url: "http://localhost:5000"
+      sample_rate: 24000
+    
+    # Docker-specific optimizations
+    docker:
+      compose_files:
+        gpu: ["docker-compose.yml", "docker-compose.gpu.yml"]
+        cpu: ["docker-compose.yml", "docker-compose.cpu.yml"]
+      service_urls:
+        whisperlive: "ws://localhost:9090"
+        ollama: "http://localhost:11434"
+        kokoro: "http://localhost:5000"
+      health_check_timeout: 60
+    
+    # VAD optimized for Docker services
+    vad:
+      min_speech_ms: 250
+      pause_ms: 800
+
+  # macOS native platform configuration  
+  macos_native:
+    stt:
+      service: "mlx_whisper"
+      model_size: "base"  # MLX can handle base model well
+      sample_rate: 16000
+    
+    llm:
+      base_url: "http://localhost:11434"
+      # Recommended models for Apple Silicon
+      model_m1: "llama3.2:1b"    # Conservative for M1
+      model_m2: "llama3.2:3b"    # Good for M2
+      model_m3: "llama3.2:7b"    # Powerful M3 can handle larger
+    
+    tts:
+      service: "native_kokoro"  # Options: "macos", "pyttsx3", "native_kokoro"
+      sample_rate: 24000
+      # Fallback to macOS TTS if native_kokoro fails
+      fallback:
+        service: "macos"
+        voice: "Samantha"
+        rate: 180
+        volume: 0.9
+        sample_rate: 22050
+    
+    # Alternative TTS configurations for macOS
+    tts_alternatives:
+      macos_system:
+        service: "macos"
+        voice: "Alex"
+        rate: 180
+        volume: 0.9
+        sample_rate: 22050
+      
+      pyttsx3:
+        service: "pyttsx3"
+        voice_id: null
+        rate: 200
+        volume: 0.8
+        sample_rate: 22050
+    
+    # macOS-specific settings
+    macos:
+      # Audio settings
+      audio:
+        input_device: null     # null = use default
+        output_device: null    # null = use default  
+        buffer_size: 512       # Smaller for lower latency
+      
+      # Performance settings for Apple Silicon
+      performance:
+        mlx_whisper: true      # Use MLX acceleration
+        ollama_threads: 0      # 0 = auto-detect cores
+        metal_acceleration: true
+        mlx_optimization: true
+      
+      # Service dependencies
+      dependencies:
+        ollama: "brew install ollama"
+        ffmpeg: "brew install ffmpeg"
+        mlx_whisper: "pip install 'pipecat-ai[mlx-whisper]'"
+    
+    # VAD optimized for native performance
+    vad:
+      min_speech_ms: 150     # Faster detection
+      pause_ms: 500          # Shorter pause
+
+  # WSL platform configuration (extends Docker)
+  wsl:
+    extends: "docker"  # Inherit Docker configuration
+    
+    # WSL-specific overrides
+    audio:
+      transport: "wsl_audio_transport"
+      buffer_size: 1024  # Larger buffer for WSL audio issues
+    
+    # Conservative settings for WSL
+    llm:
+      model: "llama3.2:1b"  # Smaller model for WSL performance
+    
+    stt:
+      model: "tiny"  # Fastest model for WSL
+
+  # Windows platform configuration (extends Docker)
+  windows:
+    extends: "docker"  # Inherit Docker configuration
+    
+    # Windows-specific overrides
+    audio:
+      transport: "windows_audio_transport"
+    
+    # Conservative settings
+    llm:
+      model: "llama3.2:1b"
+
+# Platform selection hints
+platform:
+  # Auto-detection behavior
+  auto_detect: true
+  
+  # Preferred platform (overrides auto-detection)
+  # Options: "docker", "macos_native", "wsl", "windows"
+  preferred: null
+  
+  # Fallback hierarchy
+  fallbacks:
+    macos_native: ["docker"]
+    docker: ["macos_native"]  # If on macOS
+    wsl: ["docker"]
+    windows: ["docker"]
+
+# Production optimizations by platform
+production:
+  # Docker production settings
+  docker:
+    stt:
+      model: "tiny"  # Fastest for production
+    llm:
+      model: "llama3.2:1b"
+      max_tokens: 100
+    audio:
+      buffer_size: 512
+  
+  # macOS production settings
+  macos_native:
+    stt:
+      model_size: "tiny"
+    llm:
+      model: "llama3.2:1b" 
+      max_tokens: 100
+    macos:
+      performance:
+        mlx_optimization: true
+
+# Advanced configuration
+advanced:
+  # Enable platform capability detection
+  detect_capabilities: true
+  
+  # Enable performance profiling
+  enable_profiling: false
+  
+  # Enable service health monitoring
+  health_monitoring:
+    enabled: true
+    interval: 30  # seconds
+  
+  # Enable automatic service recovery
+  auto_recovery:
+    enabled: true
+    max_retries: 3
+    backoff_factor: 2.0
