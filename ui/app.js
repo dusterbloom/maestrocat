@@ -66,6 +66,19 @@ class MaestroCatDebugApp {
       this.websocket.sendConfigUpdate(component, settings);
     });
     
+    // UI events
+    this.ui.on('conversation:export', () => {
+      this.exportConversation();
+    });
+    
+    this.ui.on('metrics:export', () => {
+      this.exportMetrics();
+    });
+    
+    this.ui.on('metrics:clear', () => {
+      this.clearMetrics();
+    });
+    
     // Command palette commands
     this.commandPalette.on('command', (command) => {
       this.executeCommand(command);
@@ -177,6 +190,14 @@ class MaestroCatDebugApp {
         this.exportConversation();
         break;
         
+      case 'export-metrics':
+        this.exportMetrics();
+        break;
+        
+      case 'clear-metrics':
+        this.clearMetrics();
+        break;
+        
       case 'toggle-event-stream':
         this.events.togglePause();
         break;
@@ -226,6 +247,61 @@ class MaestroCatDebugApp {
     this.ui.showToast('Conversation exported', 'success');
   }
   
+  exportMetrics() {
+    const metricsHistory = this.metrics.getHistory();
+    const csvData = this.convertMetricsToCSV(metricsHistory);
+    
+    // Export as CSV for easy analysis
+    const csvBlob = new Blob([csvData], { type: 'text/csv' });
+    const csvUrl = URL.createObjectURL(csvBlob);
+    const csvLink = document.createElement('a');
+    csvLink.href = csvUrl;
+    csvLink.download = `maestrocat-metrics-${Date.now()}.csv`;
+    csvLink.click();
+    URL.revokeObjectURL(csvUrl);
+    
+    // Also export as JSON for full data
+    const jsonBlob = new Blob([JSON.stringify(metricsHistory, null, 2)], { type: 'application/json' });
+    const jsonUrl = URL.createObjectURL(jsonBlob);
+    const jsonLink = document.createElement('a');
+    jsonLink.href = jsonUrl;
+    jsonLink.download = `maestrocat-metrics-${Date.now()}.json`;
+    jsonLink.click();
+    URL.revokeObjectURL(jsonUrl);
+    
+    this.ui.showToast(`Metrics exported (${metricsHistory.length} records)`, 'success');
+  }
+  
+  convertMetricsToCSV(metricsHistory) {
+    if (metricsHistory.length === 0) {
+      return 'timestamp,component,stt_latency_ms,llm_latency_ms,tts_latency_ms,total_latency_ms\n';
+    }
+    
+    const headers = 'timestamp,component,stt_latency_ms,llm_latency_ms,tts_latency_ms,total_latency_ms,date_time\n';
+    const rows = metricsHistory.map(record => {
+      const data = record.data || record;
+      const timestamp = data.timestamp || Date.now() / 1000;
+      const dateTime = new Date(timestamp * 1000).toISOString();
+      
+      return [
+        timestamp,
+        data.component || 'unknown',
+        data.stt_latency_ms || 0,
+        data.llm_latency_ms || 0,
+        data.tts_latency_ms || 0,
+        data.total_latency_ms || 0,
+        dateTime
+      ].join(',');
+    }).join('\n');
+    
+    return headers + rows;
+  }
+  
+  clearMetrics() {
+    this.metrics.clear();
+    this.ui.showToast('Metrics cleared', 'success');
+  }
+
   exportLogs() {
     const logs = {
       events: this.events.getAll(),

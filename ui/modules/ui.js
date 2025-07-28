@@ -23,6 +23,10 @@ export class UIManager extends EventEmitter {
       clearConversation: document.getElementById('clear-conversation'),
       exportConversation: document.getElementById('export-conversation'),
       
+      // Metrics
+      exportMetrics: document.getElementById('export-metrics'),
+      clearMetrics: document.getElementById('clear-metrics'),
+      
       // Audio control
       audioControl: document.getElementById('audio-control'),
       
@@ -49,6 +53,18 @@ export class UIManager extends EventEmitter {
     // Export conversation
     this.elements.exportConversation?.addEventListener('click', () => {
       this.emit('conversation:export');
+    });
+    
+    // Export metrics
+    this.elements.exportMetrics?.addEventListener('click', () => {
+      this.emit('metrics:export');
+    });
+    
+    // Clear metrics
+    this.elements.clearMetrics?.addEventListener('click', () => {
+      if (confirm('Clear all metrics history?')) {
+        this.emit('metrics:clear');
+      }
     });
   }
   

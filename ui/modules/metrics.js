@@ -412,6 +412,19 @@ export class MetricsManager extends EventEmitter {
   getHistory() {
     return this.state.getMetricsHistory();
   }
+  
+  clear() {
+    this.state.clearMetricsHistory();
+    // Update the displays to show cleared state
+    this.updateDisplays({
+      stt_latency_ms: 0,
+      llm_latency_ms: 0,
+      tts_latency_ms: 0,
+      total_latency_ms: 0
+    });
+    // Re-render the chart
+    this.render();
+  }
 }
 
 // Add CSS for metric animations

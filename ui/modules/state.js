@@ -175,6 +175,17 @@ export class StateManager extends EventEmitter {
     return history.slice(-limit);
   }
   
+  clearMetricsHistory() {
+    this.state.metrics.history = [];
+    this.state.metrics.current = {
+      stt_latency_ms: 0,
+      llm_latency_ms: 0,
+      tts_latency_ms: 0,
+      total_latency_ms: 0
+    };
+    this.emit('metrics:cleared');
+  }
+  
   // Module methods
   updateModuleStatus(moduleName, status) {
     const normalizedName = moduleName.toLowerCase().replace(/\s+/g, '_');
