@@ -315,12 +315,15 @@ class WhisperCppSTTService(STTService):
         
         # Emit transcription event for debug UI
         if self._event_emitter:
+            logger.info(f"📤 Emitting transcription event: '{text}'")
             await self._event_emitter.emit("transcription_final", {
                 "text": text,
                 "confidence": 1.0,  # Whisper.cpp doesn't provide confidence
                 "timestamp": time.time(),
                 "user_id": "user"
             })
+        else:
+            logger.warning("⚠️ No event emitter available for transcription events")
         
         # Create transcription frame
         frame = TranscriptionFrame(
@@ -359,7 +362,7 @@ class WhisperCppSTTService(STTService):
                 logger.info(f"Processing audio chunk: {len(chunk_data)} bytes, max_amplitude: {max_amplitude}")
                 
                 # Only process audio with significant amplitude
-                if max_amplitude > 1000:  # Threshold for speech detection
+                if max_amplitude > 500:  # Threshold for speech detection (lowered to reduce false negatives)
                     logger.info(f"Audio chunk above threshold, adding to queue")
                     # Add to processing queue
                     self._audio_queue.put(chunk_data)

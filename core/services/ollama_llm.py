@@ -143,10 +143,13 @@ class OLLamaLLMService(LLMService):
             
             # Emit LLM response start event
             if self._event_emitter:
+                logger.info(f"📤 Emitting LLM response start event")
                 await self._event_emitter.emit("llm_response_start", {
                     "model": self._model,
                     "timestamp": time.time()
                 })
+            else:
+                logger.warning("⚠️ No event emitter available for LLM events")
             
             # Stream response
             async with self._client.stream(
