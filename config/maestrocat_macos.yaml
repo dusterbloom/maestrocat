@@ -10,7 +10,7 @@ vad:
 # WhisperCpp STT (Native C++ implementation, fastest for macOS)
 stt:
   service: "whispercpp"   # Uses native Whisper.cpp - FASTEST option for macOS
-  model_size: "distil-large-v3"  # Use distil-large-v3 for best accuracy/speed balance
+  model_size: "medium"  # Using medium for faster STT processing (testing turn metrics)
   language: "en"          # Language code or "auto" for detection
   translate: false  
   sample_rate: 16000
@@ -104,7 +104,7 @@ development:
 production:
   # Smaller models for better performance
   stt:
-    model_size: "distil-large-v3"     # Fastest Whisper model
+    model_size: "medium"     # Using medium for faster STT processing
     
   llm:
     model: "llama3.2:1b"   # Smaller, faster model

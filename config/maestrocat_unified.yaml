@@ -93,7 +93,7 @@ platforms:
   macos_native:
     stt:
       service: "mlx_whisper"             # Standard MLX Whisper for real-time performance
-      model_size: "distil-large-v3"      # Best accuracy/speed balance  
+      model_size: "medium"      # Using medium for faster STT processing (testing turn metrics)  
       sample_rate: 16000
       compute_type: "float16"            # Options: float16, int8, int4
       batch_size: 1                      # Increase for batch processing
@@ -208,7 +208,7 @@ production:
   # Docker production settings
   docker:
     stt:
-      model: "distil-large-v3"  # Fastest for production
+      model: "medium"  # Using medium for faster STT processing
     llm:
       model: "llama3.2:1b"
       max_tokens: 100
@@ -219,7 +219,7 @@ production:
   macos_native:
     stt:
       service: "lightning_whisper_mlx"
-      model_size: "distil-large-v3"
+      model_size: "medium"
       compute_type: "int8"  # Quantized for max speed
       beam_size: 1         # Greedy search for speed
     llm:

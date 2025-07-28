@@ -101,15 +101,27 @@ class LightningWhisperMLXService(STTService):
             
         logger.info(f"Compute type: {compute_type}, Batch size: {batch_size}")
         
+    async def _preload_model(self):
+        """Public method for agent to preload the model"""
+        logger.info("🚀 Pre-loading Lightning Whisper MLX model...")
+        await self._load_model()
+        logger.info("✅ Lightning Whisper MLX model pre-loaded and ready")
+        
     async def start(self, frame: Frame):
         """Start the STT service and load model"""
         await super().start(frame)
         
-        # Load model asynchronously
-        await self._load_model()
+        # Load model asynchronously (skip if already loaded by preload)
+        if self._model is None:
+            await self._load_model()
         
     async def _load_model(self):
         """Load the MLX Whisper model"""
+        # Skip if already loaded
+        if self._model is not None:
+            logger.info(f"✅ {self._backend} Whisper model already loaded")
+            return
+            
         try:
             logger.info(f"Loading {self._backend} Whisper model: {self._model_name}")
             start_time = time.time()

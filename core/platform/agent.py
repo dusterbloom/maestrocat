@@ -212,6 +212,14 @@ class MaestroCatAgent:
             logger.info("🚀 Pre-loading LLM model for instant responses...")
             await self.llm._preload_model()
             logger.info("✅ LLM model pre-loaded and ready")
+            
+        # Pre-load STT model for instant responses
+        if hasattr(self.stt, '_preload_model'):
+            logger.info("🚀 Pre-loading STT model for instant responses...")
+            await self.stt._preload_model()
+            logger.info("✅ STT model pre-loaded and ready")
+        else:
+            logger.info("ℹ️  STT service will load model on first use")
     
     async def _load_modules(self):
         """Load configured modules"""
