@@ -1,0 +1,108 @@
+# docker/maestrocat/Dockerfile.secure
+# Hardened Dockerfile with security best practices
+
+# Use specific version and minimal base image
+FROM python:3.11-slim-bullseye AS builder
+
+# Security: Update packages and install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    portaudio19-dev \
+    libsndfile1-dev \
+    ffmpeg \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Create non-root user for building
+RUN groupadd -r maestrocat && useradd --no-log-init -r -g maestrocat maestrocat
+
+WORKDIR /build
+
+# Copy requirements first for better caching
+COPY requirements.txt ./
+COPY setup.py ./
+COPY core/ ./core/
+COPY config/ ./config/
+
+# Install Python dependencies
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -e .
+
+# Runtime stage - smaller and more secure
+FROM python:3.11-slim-bullseye AS runtime
+
+# Security: Install only runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    portaudio19-dev \
+    libsndfile1 \
+    ffmpeg \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean \
+    && apt-get autoremove -y
+
+# Security: Create non-root user with specific UID/GID
+RUN groupadd -g 1004 maestrocat && \
+    useradd --no-log-init -r -u 1004 -g maestrocat maestrocat
+
+# Security: Create directories with proper permissions
+RUN mkdir -p /app/logs /app/config /app/cache /app/models \
+    && chown -R maestrocat:maestrocat /app \
+    && chmod 755 /app
+
+# Copy Python packages from builder
+COPY --from=builder --chown=maestrocat:maestrocat /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder --chown=maestrocat:maestrocat /usr/local/bin /usr/local/bin
+
+# Copy application code
+COPY --chown=maestrocat:maestrocat core/ /app/core/
+COPY --chown=maestrocat:maestrocat config/ /app/config/
+COPY --chown=maestrocat:maestrocat scripts/ /app/scripts/
+
+# Set working directory
+WORKDIR /app
+
+# Security: Set proper file permissions
+RUN find /app -type f -exec chmod 644 {} \; \
+    && find /app -type d -exec chmod 755 {} \; \
+    && chmod +x /app/scripts/*.sh 2>/dev/null || true
+
+# Security: Remove unnecessary packages and files
+RUN apt-get purge -y --auto-remove \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /tmp/* \
+    && rm -rf /var/tmp/* \
+    && rm -rf /root/.cache
+
+# Security: Switch to non-root user
+USER maestrocat:maestrocat
+
+# Security: Set secure environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
+    PATH="/usr/local/bin:$PATH" \
+    MAESTROCAT_ENV=production \
+    CORE_DUMP_DISABLED=1
+
+# Security: Expose only necessary port
+EXPOSE 8080
+
+# Security: Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+# Use exec form to avoid shell
+ENTRYPOINT ["python", "-m", "core.apps.debug_ui"]
+
+# Security: Labels for metadata
+LABEL maintainer="MaestroCat Security Team" \
+      version="1.0.0" \
+      description="Hardened MaestroCat application container" \
+      security.scan="enabled" \
+      security.user="maestrocat:1004" \
+      security.capabilities="NET_BIND_SERVICE"
