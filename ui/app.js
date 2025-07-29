@@ -152,8 +152,8 @@ class MaestroCatDebugApp {
       case 'transcription_final':
         this.ui.addMessage('user', event.data.text);
         this.ui.updateTranscription('final', event.data);
-        // Try to auto-detect language change from user transcription
-        this.config.autoDetectLanguageFromTranscription(event.data.text);
+        // NOTE: Automatic language detection has been DISABLED
+        // this.config.autoDetectLanguageFromTranscription(event.data.text);
         break;
         
       case 'llm_response_start':
@@ -166,8 +166,8 @@ class MaestroCatDebugApp {
         
       case 'llm_response_complete':
         this.ui.finalizeAssistantMessage(event.data.text);
-        // Try to auto-detect language change from LLM response
-        this.config.autoDetectLanguageFromResponse(event.data.text);
+        // NOTE: Automatic language detection has been DISABLED
+        // this.config.autoDetectLanguageFromResponse(event.data.text);
         break;
         
       case 'metrics_update':

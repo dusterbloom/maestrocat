@@ -68,7 +68,12 @@ export class ConfigManager extends EventEmitter {
       { id: 'zm_yunyang', name: 'Yunyang (Chinese, Male)', lang: 'zh', region: 'cn', gender: 'male' },
       { id: 'pf_dora', name: 'Dora (Portuguese, Female)', lang: 'pt', region: 'pt', gender: 'female' },
       { id: 'pm_alex', name: 'Alex (Portuguese, Male)', lang: 'pt', region: 'pt', gender: 'male' },
-      { id: 'pm_santa', name: 'Santa (Portuguese, Male)', lang: 'pt', region: 'pt', gender: 'male' }
+      { id: 'pm_santa', name: 'Santa (Portuguese, Male)', lang: 'pt', region: 'pt', gender: 'male' },
+      
+      // Spanish
+      { id: 'ef_dora', name: 'Dora (Spanish, Female)', lang: 'es', region: 'es', gender: 'female' },
+      { id: 'em_alex', name: 'Alex (Spanish, Male)', lang: 'es', region: 'es', gender: 'male' },
+      { id: 'em_santa', name: 'Santa (Spanish, Male)', lang: 'es', region: 'es', gender: 'male' }
     ];
   }
   
@@ -319,15 +324,15 @@ export class ConfigManager extends EventEmitter {
   
   getDefaultVoiceForLanguage(lang) {
     const defaults = {
-      'en': 'af_sarah',
+      'en': 'af_bella',    // Default English voice (matches config)
       'fr': 'ff_siwis',
       'it': 'if_sara',
       'ja': 'jf_alpha',
       'zh': 'zf_xiaobei',
       'pt': 'pf_dora',
-      'es': 'af_sarah' // Fallback to English for Spanish
+      'es': 'ef_dora'      // Spanish female voice
     };
-    return defaults[lang] || 'af_sarah';
+    return defaults[lang] || 'af_bella';
   }
 
   handleLanguageChange(language) {
@@ -358,35 +363,10 @@ export class ConfigManager extends EventEmitter {
         this.populateVoiceDropdown(language);
       }
       
-      // 5. Update TTS voice to the default for this language if current voice doesn't match
-      const currentVoice = this.elements.ttsVoice?.value;
-      const currentVoiceObj = this.kokoroVoices.find(v => v.id === currentVoice);
-      
-      console.log(`🔍 Current voice: ${currentVoice}, Voice object:`, currentVoiceObj);
-      console.log(`🔍 Voice language match: ${currentVoiceObj?.lang} === ${language} ? ${currentVoiceObj?.lang === language}`);
-      
-      if (!currentVoice || !currentVoiceObj || currentVoiceObj.lang !== language) {
-        const defaultVoice = this.getDefaultVoiceForLanguage(language);
-        console.log(`🎯 Switching to default voice for ${language}: ${defaultVoice}`);
-        
-        if (defaultVoice && this.elements.ttsVoice) {
-          this.elements.ttsVoice.value = defaultVoice;
-          this.updateConfig('tts', { voice: defaultVoice });
-          console.log(`✅ Voice auto-changed to ${defaultVoice} for language ${language}`);
-          console.log(`📤 TTS config update sent with voice: ${defaultVoice}`);
-        } else {
-          console.warn(`⚠️ Could not find default voice for language: ${language}`);
-        }
-      } else {
-        console.log(`✅ Current voice ${currentVoice} already matches language ${language}`);
-        
-        // FORCE UPDATE: Even if UI thinks voice matches, send update to ensure backend sync
-        console.log(`🔄 Force-syncing voice to backend: ${currentVoice}`);
-        this.updateConfig('tts', { voice: currentVoice });
-        console.log(`📤 Force TTS config update sent with voice: ${currentVoice}`);
-      }
-      
-      console.log(`🏁 Language change completed: ${language}, STT: ${sttLanguage}, Voice: ${this.elements.ttsVoice?.value}`);
+      // NOTE: Automatic voice switching has been REMOVED
+      // Voice will only change when user explicitly selects it
+      console.log(`🏁 Language change completed: ${language}, STT: ${sttLanguage}`);
+      console.log(`🎤 Voice remains: ${this.elements.ttsVoice?.value} (no automatic switching)`);
     } catch (error) {
       console.error('❌ Error handling language change:', error);
     }
@@ -451,17 +431,9 @@ export class ConfigManager extends EventEmitter {
       this.setElementValue('ttsVoice', config.tts.voice);
       this.setSliderValue('ttsSpeed', 'ttsSpeedValue', config.tts.speed);
       
-      // Check if the loaded voice matches the language, if not auto-correct
-      const currentVoiceObj = this.kokoroVoices.find(v => v.id === config.tts.voice);
-      if (currentVoiceObj && currentVoiceObj.lang !== userLanguage) {
-        console.log(`🔄 Auto-correcting voice mismatch: ${config.tts.voice} (${currentVoiceObj.lang}) -> ${userLanguage}`);
-        const defaultVoice = this.getDefaultVoiceForLanguage(userLanguage);
-        if (defaultVoice) {
-          this.elements.ttsVoice.value = defaultVoice;
-          this.updateConfig('tts', { voice: defaultVoice });
-          console.log(`✅ Voice auto-corrected to ${defaultVoice} for language ${userLanguage}`);
-        }
-      }
+      // NOTE: Automatic voice correction has been REMOVED
+      // Voice will keep its configured value regardless of language
+      console.log(`🎤 Voice loaded: ${config.tts.voice} (no automatic correction)`);
     }
     
     if (config.vad) {
@@ -573,25 +545,25 @@ export class ConfigManager extends EventEmitter {
         },
         user_language: 'en'
       },
-      'italian': {
+      'qwen3b': {
         llm: {
-          model: 'llama3.2:3b',
+          model: 'qwen3:8b',
           temperature: 0.7,
           max_tokens: 1000,
           top_p: 0.9,
           response_language: 'it'
         },
         tts: {
-          voice: 'if_sara',
+          voice: 'af_bella',
           speed: 1.0
         },
         stt: {
-          language: 'auto'
+          language: 'en'
         },
         vad: {
           threshold: 0.5
         },
-        user_language: 'it'
+        user_language: 'en'
       }
     };
     
@@ -631,65 +603,28 @@ export class ConfigManager extends EventEmitter {
     this.emit('reload_requested');
   }
   
-  // Auto-detect language from text and update UI if needed
+  // NOTE: Automatic language detection has been DISABLED
+  // Language will only change when user explicitly selects it
+  
+  // Auto-detect language from text and update UI if needed (DISABLED)
   autoDetectLanguageFromText(text, source = 'unknown') {
-    if (!text || typeof text !== 'string') return false;
-    
-    // Simple language detection based on common words and patterns
-    const languagePatterns = {
-      'it': [
-        /\b(buona|buongiorno|buonasera|ciao|grazie|prego|sono|questo|come|dove|quando|perché|komeva)\b/i,
-        /\b(villaggio|italiano|strade|case|colorate|sera)\b/i
-      ],
-      'fr': [
-        /\b(bonjour|bonsoir|salut|merci|s'il vous plaît|je suis|comment|où|quand|pourquoi)\b/i,
-        /\b(français|ville|rue|maison)\b/i
-      ],
-      'es': [
-        /\b(hola|buenos días|buenas tardes|gracias|por favor|soy|cómo|dónde|cuándo|por qué)\b/i,
-        /\b(español|ciudad|calle|casa)\b/i
-      ],
-      'zh': [
-        /[\u4e00-\u9fff]/,  // Chinese characters
-      ],
-      'ja': [
-        /[\u3040-\u309f\u30a0-\u30ff\u4e00-\u9fff]/,  // Hiragana, Katakana, Kanji
-      ]
-    };
-    
-    const currentLanguage = this.elements.userLanguage?.value || 'en';
-    
-    // Check for each language
-    for (const [lang, patterns] of Object.entries(languagePatterns)) {
-      if (lang !== currentLanguage) {
-        const hasMatches = patterns.some(pattern => pattern.test(text));
-        if (hasMatches) {
-          console.log(`🔍 Auto-detected language change from ${source}: ${currentLanguage} -> ${lang}`);
-          console.log(`📝 ${source} text sample: "${text.substring(0, 100)}..."`);
-          
-          // Automatically switch language in UI
-          this.elements.userLanguage.value = lang;
-          this.handleLanguageChange(lang);
-          
-          // Show notification to user
-          const langName = this.getLanguageName(lang);
-          console.log(`🎯 Auto-switched to ${langName} based on ${source}`);
-          return true;
-        }
-      }
-    }
-    
+    // This method has been disabled to prevent automatic language switching
+    console.log(`📝 Language auto-detection DISABLED for ${source}: "${text.substring(0, 50)}..."`);
     return false;
   }
 
-  // Auto-detect language from LLM response
+  // Auto-detect language from LLM response (DISABLED)
   autoDetectLanguageFromResponse(responseText) {
-    return this.autoDetectLanguageFromText(responseText, 'LLM response');
+    // This method has been disabled to prevent automatic language switching
+    console.log(`🤖 Language auto-detection DISABLED for LLM response`);
+    return false;
   }
 
-  // Auto-detect language from user transcription
+  // Auto-detect language from user transcription (DISABLED)
   autoDetectLanguageFromTranscription(transcriptionText) {
-    return this.autoDetectLanguageFromText(transcriptionText, 'user transcription');
+    // This method has been disabled to prevent automatic language switching
+    console.log(`🗣️ Language auto-detection DISABLED for user transcription`);
+    return false;
   }
 
   // Update available voices from TTS service discovery

@@ -284,6 +284,15 @@ class WhisperCppStreamingSTTService(STTService):
         self._config_language = language  # Track config language separately
         self._needs_restart = False  # Flag to track if restart is needed
         
+        # Audio feedback prevention
+        self._recent_tts_texts = []  # Store recent TTS outputs to prevent feedback
+        self._tts_buffer_duration = 10.0  # Keep TTS texts for 10 seconds
+        self._similarity_threshold = 0.85  # Threshold for detecting TTS echo
+        
+        # Process resource management
+        self._idle_timeout = 30.0  # Stop process after 30s of no activity
+        self._last_activity_time = 0.0
+        
         # Find whisper.cpp stream binary
         self._stream_binary = self._find_stream_binary()
         if not self._stream_binary:
@@ -305,7 +314,9 @@ class WhisperCppStreamingSTTService(STTService):
         # Subscribe to config change events if event emitter is available
         if self._event_emitter:
             self._event_emitter.subscribe("config_change", self._handle_config_change)
-            logger.info("🔔 Subscribed to config_change events for dynamic language updates")
+            self._event_emitter.subscribe("tts_start", self._handle_tts_start)
+            self._event_emitter.subscribe("tts_complete", self._handle_tts_complete)
+            logger.info("🔔 Subscribed to config_change and TTS events for feedback prevention")
         
         # Pre-loading state
         self._is_preloaded = False
@@ -704,6 +715,49 @@ class WhisperCppStreamingSTTService(STTService):
                         
         except Exception as e:
             logger.error(f"❌ Error handling config change: {e}")
+    
+    async def _handle_tts_start(self, event_data: dict):
+        """Handle TTS start events to track what text is being spoken"""
+        try:
+            text = event_data.get("text", "")
+            if text:
+                current_time = time.time()
+                self._recent_tts_texts.append((text.lower().strip(), current_time))
+                # Clean old entries
+                self._recent_tts_texts = [
+                    (t, ts) for t, ts in self._recent_tts_texts 
+                    if current_time - ts <= self._tts_buffer_duration
+                ]
+                logger.debug(f"🔊 Tracking TTS text for feedback prevention: '{text}'")
+        except Exception as e:
+            logger.error(f"❌ Error handling TTS start event: {e}")
+    
+    async def _handle_tts_complete(self, event_data: dict):
+        """Handle TTS completion events"""
+        logger.debug("🔊 TTS playback completed")
+    
+    def _is_tts_feedback(self, transcribed_text: str) -> bool:
+        """Check if transcribed text is likely TTS feedback/echo"""
+        if not self._recent_tts_texts or not transcribed_text:
+            return False
+        
+        transcribed_lower = transcribed_text.lower().strip()
+        current_time = time.time()
+        
+        # Clean old TTS texts
+        self._recent_tts_texts = [
+            (text, ts) for text, ts in self._recent_tts_texts 
+            if current_time - ts <= self._tts_buffer_duration
+        ]
+        
+        # Check similarity with recent TTS texts
+        for tts_text, _ in self._recent_tts_texts:
+            similarity = self._calculate_text_similarity(transcribed_lower, tts_text)
+            if similarity >= self._similarity_threshold:
+                logger.info(f"🔍 TTS feedback detected (similarity: {similarity:.2f}): '{transcribed_text}' ≈ '{tts_text}'")
+                return True
+        
+        return False
             
     async def _restart_with_new_language(self):
         """Restart the whisper-stream process with updated language settings"""
@@ -728,15 +782,77 @@ class WhisperCppStreamingSTTService(STTService):
         """Stop the whisper.cpp streaming process"""
         if self._whisper_process:
             try:
+                logger.info(f"🛑 Terminating whisper-stream process (PID: {self._whisper_process.pid})")
                 self._whisper_process.terminate()
-                self._whisper_process.wait(timeout=5)
+                self._whisper_process.wait(timeout=3)
+                logger.info("✅ Process terminated gracefully")
             except subprocess.TimeoutExpired:
+                logger.warning("⚠️ Process didn't terminate gracefully, forcing kill")
                 self._whisper_process.kill()
+                self._whisper_process.wait(timeout=2)
+                logger.info("✅ Process killed forcefully")
             except Exception as e:
-                logger.error(f"Error stopping whisper.cpp process: {e}")
+                logger.error(f"❌ Error stopping whisper.cpp process: {e}")
                 
+        self._whisper_process = None
         self._is_running = False
+        self._is_preloaded = False
         self._state = TranscriptionState.IDLE
+        logger.info("🏁 Whisper-stream process stopped and resources cleaned up")
+    
+    def force_cleanup(self):
+        """Force cleanup of any runaway whisper-stream processes (emergency stop)"""
+        import subprocess
+        
+        logger.info("🚨 Force cleanup: Killing runaway processes...")
+        
+        # Kill our own process if it exists
+        if self._whisper_process:
+            try:
+                if self._whisper_process.poll() is None:
+                    logger.info(f"🛑 Force killing our whisper-stream process (PID: {self._whisper_process.pid})")
+                    self._whisper_process.kill()
+                    self._whisper_process.wait(timeout=2)
+            except Exception as e:
+                logger.error(f"❌ Error force killing process: {e}")
+        
+        # Nuclear option: pkill all whisper-stream and maestrocat processes
+        try:
+            logger.info("🔥 Running pkill commands for complete cleanup...")
+            
+            # Kill whisper-stream processes
+            result1 = subprocess.run(
+                ["pkill", "-9", "-f", "whisper-stream"], 
+                capture_output=True, text=True, timeout=5
+            )
+            if result1.returncode == 0:
+                logger.info("✅ pkill whisper-stream successful")
+            else:
+                logger.info("ℹ️  No whisper-stream processes found")
+            
+            # Kill maestrocat processes (be careful - this might kill us too!)
+            result2 = subprocess.run(
+                ["pkill", "-9", "-f", "maestrocat.*\\.py"], 
+                capture_output=True, text=True, timeout=5
+            )
+            if result2.returncode == 0:
+                logger.info("✅ pkill maestrocat*.py successful")
+            else:
+                logger.info("ℹ️  No maestrocat processes found")
+                
+        except subprocess.TimeoutExpired:
+            logger.warning("⚠️  pkill commands timed out")
+        except FileNotFoundError:
+            logger.warning("⚠️  pkill command not found on system")
+        except Exception as e:
+            logger.error(f"❌ Error running pkill: {e}")
+        
+        # Reset our state
+        self._whisper_process = None
+        self._is_running = False
+        self._is_preloaded = False
+        self._state = TranscriptionState.IDLE
+        logger.info("🧹 Force cleanup completed - processes should be dead")
         
     def _read_stdout(self):
         """Read and parse whisper.cpp stdout for transcriptions"""
@@ -955,7 +1071,13 @@ class WhisperCppStreamingSTTService(STTService):
         """Emit a complete utterance to the pipeline"""
         current_time = time.time()
         
+        # Check for audio feedback (TTS echo)
+        if self._is_tts_feedback(utterance_text):
+            logger.warning(f"🔇 BLOCKING TTS FEEDBACK: '{utterance_text}'")
+            return
+        
         logger.info(f"🚀 EMITTING UTTERANCE TO LLM: '{utterance_text}'")
+        self._last_activity_time = current_time
         
         # Create final transcription
         transcription = StreamingTranscription(
@@ -977,18 +1099,26 @@ class WhisperCppStreamingSTTService(STTService):
         self._current_transcription = utterance_text
         
     async def _timeout_checker_loop(self):
-        """Periodically check for timeout-based utterance completion"""
+        """Periodically check for timeout-based utterance completion and idle process management"""
         logger.debug("Starting timeout checker loop")
         
         try:
             while self._is_running:
                 await asyncio.sleep(self._timeout_check_interval)
+                current_time = time.time()
                 
-                # Check for timeout-based completion
+                # Check for timeout-based utterance completion
                 timeout_utterance = self._boundary_detector.check_timeout()
                 if timeout_utterance:
                     logger.info(f"Timeout-based utterance completion: '{timeout_utterance}'")
                     self._emit_complete_utterance(timeout_utterance)
+                
+                # Check for idle timeout to save resources
+                if (self._last_activity_time > 0 and 
+                    current_time - self._last_activity_time > self._idle_timeout and
+                    self._whisper_process and self._whisper_process.poll() is None):
+                    logger.info(f"⏰ No activity for {self._idle_timeout}s, stopping whisper-stream to save resources")
+                    self._stop_streaming_process()
                     
         except asyncio.CancelledError:
             logger.debug("Timeout checker loop cancelled")
@@ -1031,12 +1161,9 @@ class WhisperCppStreamingSTTService(STTService):
         # Capture the current event loop for thread-safe async calls
         self._loop = asyncio.get_event_loop()
         
-        # Only start the process if not already preloaded
-        if not self._is_preloaded:
-            logger.info("🚀 Starting Whisper.cpp process (not pre-loaded)")
-            self._start_streaming_process()
-        else:
-            logger.info("✅ Using pre-loaded Whisper.cpp process")
+        # Don't auto-start process - start on-demand to save resources
+        logger.info("🎤 STT service ready - will start whisper-stream on first audio input")
+        self._last_activity_time = time.time()
         
         # Start timeout checker task
         self._timeout_checker_task = asyncio.create_task(self._timeout_checker_loop())
@@ -1065,6 +1192,17 @@ class WhisperCppStreamingSTTService(STTService):
     async def process_frame(self, frame: Frame, direction):
         """Process incoming audio frames"""
         await super().process_frame(frame, direction)
+        
+        # Start whisper-stream on-demand when audio is detected
+        from pipecat.frames.frames import AudioRawFrame
+        if isinstance(frame, AudioRawFrame) and not self._is_running:
+            logger.info("🎤 Audio detected - starting whisper-stream on-demand")
+            self._start_streaming_process()
+            self._last_activity_time = time.time()
+        
+        # Update activity time for any audio frame
+        if isinstance(frame, AudioRawFrame):
+            self._last_activity_time = time.time()
         
         # Note: whisper-stream captures audio directly via SDL2
         # We just pass frames through the pipeline for VAD and interruption handling

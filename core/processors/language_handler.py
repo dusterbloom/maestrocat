@@ -54,7 +54,7 @@ class LanguageHandler:
             logger.info(f"🌍 Updating entire pipeline to language: {new_language}")
             await self._update_language(new_language)
             
-            # Also emit events to update STT and TTS services
+            # Only update STT language - no automatic voice switching
             if self._event_emitter:
                 # Update STT language
                 await self._event_emitter.emit("config_change", {
@@ -62,16 +62,8 @@ class LanguageHandler:
                     "settings": {"language": new_language}
                 })
                 
-                # Update TTS voice based on language
-                if self._config:
-                    language_config = getattr(self._config, 'language_config', {})
-                    lang_settings = language_config.get(new_language, {})
-                    new_voice = lang_settings.get('voice', 'af_bella')
-                    
-                    await self._event_emitter.emit("config_change", {
-                        "component": "tts_voice_update",
-                        "settings": {"voice": new_voice}
-                    })
+                # NOTE: Automatic TTS voice switching has been REMOVED
+                # Voice will only change when user explicitly selects it
     
     async def _update_language(self, language: str):
         """Update the system prompt based on language"""
