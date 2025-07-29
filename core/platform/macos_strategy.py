@@ -319,7 +319,7 @@ class MacOSPlatformStrategy(PlatformStrategy):
                 
                 # Always use auto-detect (None) for multilingual support
                 # This allows Whisper to detect any language and transcribe it properly
-                lang_enum = None
+                lang_enum = "auto" if language == "auto" else Language.from_code(language)
                 logger.info("🌍 Using auto-detect mode for multilingual transcription")
                 
                 return MLXWhisperPreloadSTTService(

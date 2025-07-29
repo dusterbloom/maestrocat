@@ -213,7 +213,7 @@ class WhisperCppStreamingSTTService(STTService):
         *,
         model_path: str = None,
         model_size: str = "base",
-        language: str = "en",
+        language: str = "auto",
         translate: bool = False,
         sample_rate: int = 16000,
         channels: int = 1,
@@ -279,6 +279,11 @@ class WhisperCppStreamingSTTService(STTService):
         self._timeout_checker_task = None
         self._timeout_check_interval = 1.0  # Check every second
         
+        # Language change handling
+        self._original_language = language  # Store original for comparison
+        self._config_language = language  # Track config language separately
+        self._needs_restart = False  # Flag to track if restart is needed
+        
         # Find whisper.cpp stream binary
         self._stream_binary = self._find_stream_binary()
         if not self._stream_binary:
@@ -290,7 +295,13 @@ class WhisperCppStreamingSTTService(STTService):
         # Ensure model exists
         self._ensure_model()
         
+        # Subscribe to config change events if event emitter is available
+        if self._event_emitter:
+            self._event_emitter.subscribe("config_change", self._handle_config_change)
+            logger.info("🔔 Subscribed to config_change events for dynamic language updates")
+        
         logger.info(f"Initialized WhisperCppStreamingSTTService with model: {self._model_path}")
+        logger.info(f"🌍 Initial language setting: '{self._language}', Auto-detect: {self._language == 'auto'}")
         
     def _find_stream_binary(self) -> Optional[str]:
         """Find whisper.cpp stream binary in common locations"""
@@ -368,7 +379,6 @@ class WhisperCppStreamingSTTService(STTService):
             self._stream_binary,
             "-m", self._model_path,
             "-t", str(self._threads),  # Configurable thread count
-            "-l", self._language,
             "--step", str(self._step_ms),  # Fixed time steps to eliminate overlap
             "--length", str(self._length_ms),  # Configurable context window
             "--keep", str(self._keep_ms),  # Configurable context retention
@@ -378,8 +388,35 @@ class WhisperCppStreamingSTTService(STTService):
             "-nf",  # No temperature fallback to reduce hallucinations
         ]
         
-        if self._translate:
-            cmd.append("-tr")
+        # Handle language setting - only add -l flag if not auto-detecting
+        if self._language and self._language.lower() != "auto":
+            cmd.extend(["-l", self._language])
+            logger.info(f"🌍 Using explicit language: {self._language}")
+        else:
+            logger.info("🤖 Using automatic language detection - whisper will detect and transcribe in detected language")
+        
+        # Add keep-context flag for better language consistency (based on whisper-stream help)
+        if not self._translate and self._language and self._language.lower() not in ["en", "auto"]:
+            cmd.append("-kc")  # Keep context between chunks for consistency
+            logger.info("🔗 Added --keep-context flag for language consistency")
+        elif self._language and self._language.lower() == "auto":
+            cmd.append("-kc")  # Always use keep-context for auto-detection to maintain consistency
+            logger.info("🔗 Added --keep-context flag for auto-detection consistency")
+        
+        # Debug: Log language and translate settings for troubleshooting
+        logger.info(f"🌍 Language setting: '{self._language}', Translate: {self._translate}")
+        logger.info(f"📁 Model path: '{self._model_path}'")
+        
+        # Check if using English-only model (major cause of forced translation)
+        if self._model_path and "base.en.bin" in self._model_path:
+            logger.warning("⚠️  WARNING: Using English-only model (.en.bin) - this will force translation!")
+            logger.warning("⚠️  Solution: Use multilingual model (ggml-base.bin) instead")
+        
+        # if self._translate:
+        #     cmd.append("-tr")
+        #     logger.info("🔄 Translation ENABLED - will translate to English")
+        # else:
+        #     logger.info(f"🚫 Translation DISABLED - should stay in {self._language}")
             
         logger.info(f"Starting whisper.cpp stream: {' '.join(cmd)}")
         
@@ -548,6 +585,65 @@ class WhisperCppStreamingSTTService(STTService):
         # No significant overlap found - add to buffer and process
         self._transcription_buffer.append((text, time.time()))
         return text
+
+    async def _handle_config_change(self, event_data: dict):
+        """Handle configuration change events for dynamic language switching"""
+        try:
+            component = event_data.get("component")
+            settings = event_data.get("settings", {})
+            
+            if component == "stt" and "language" in settings:
+                new_language = settings["language"]
+                logger.info(f"🔄 STT language change requested: {self._language} -> {new_language}")
+                
+                if new_language != self._language:
+                    self._config_language = new_language
+                    self._language = new_language
+                    self._needs_restart = True
+                    logger.info(f"✅ Language updated to: {new_language}")
+                    
+                    # Restart the whisper process with new language
+                    if self._is_running:
+                        logger.info("🔄 Restarting whisper-stream with new language...")
+                        await self._restart_with_new_language()
+                    else:
+                        logger.info("⏳ Process not running, will use new language on next start")
+                        
+            elif component == "user_language":
+                # Handle unified language updates
+                new_language = str(settings) if isinstance(settings, str) else settings.get("language", settings)
+                logger.info(f"🌍 User language change: {self._language} -> {new_language}")
+                
+                if new_language != self._language:
+                    self._config_language = new_language
+                    self._language = new_language
+                    self._needs_restart = True
+                    
+                    if self._is_running:
+                        logger.info("🔄 Restarting whisper-stream for user language change...")
+                        await self._restart_with_new_language()
+                        
+        except Exception as e:
+            logger.error(f"❌ Error handling config change: {e}")
+            
+    async def _restart_with_new_language(self):
+        """Restart the whisper-stream process with updated language settings"""
+        try:
+            logger.info(f"🛑 Stopping current whisper-stream process...")
+            self._stop_streaming_process()
+            
+            # Give process time to fully stop
+            await asyncio.sleep(0.5)
+            
+            logger.info(f"🚀 Starting whisper-stream with language: {self._language}")
+            self._start_streaming_process()
+            self._needs_restart = False
+            
+            logger.info("✅ Whisper-stream restarted successfully with new language")
+            
+        except Exception as e:
+            logger.error(f"❌ Error restarting whisper-stream: {e}")
+            self._needs_restart = True  # Mark for retry
 
     def _stop_streaming_process(self):
         """Stop the whisper.cpp streaming process"""
