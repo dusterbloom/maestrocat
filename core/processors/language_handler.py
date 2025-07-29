@@ -14,13 +14,13 @@ logger = logging.getLogger(__name__)
 class LanguageHandler:
     """Handles language changes and updates system prompts"""
     
-    def __init__(self, context: OpenAILLMContext, event_emitter=None):
+    def __init__(self, context: OpenAILLMContext, event_emitter=None, config=None):
         self._context = context
         self._event_emitter = event_emitter
+        self._config = config
         self._current_language = 'en'
-        self._language_prompts = self._create_language_prompts()
         
-        # Subscribe to config changes if event emitter is available
+        # Subscribe to language changes if event emitter is available
         if self._event_emitter:
             self._event_emitter.subscribe("config_change", self._handle_config_change)
     
@@ -38,18 +38,40 @@ class LanguageHandler:
     
     async def _handle_config_change(self, event: Dict[str, Any]):
         """Handle configuration change events"""
-        component = event.get("component")
-        settings = event.get("settings", {})
+        # Extract data from the event wrapper
+        data = event.get("data", {})
+        component = data.get("component")
+        settings = data.get("settings", {})
         
         logger.info(f"LanguageHandler received config change: {component} - {settings}")
         
-        if component == "llm" and "response_language" in settings:
-            await self._update_language(settings["response_language"])
-        elif component == "stt" and "language" in settings:
-            # Log STT language change
-            logger.info(f"STT language changed to: {settings['language']}")
-            # Don't update system prompt for STT changes
-            pass
+        # Handle single language changes that affect entire pipeline
+        if component == "language" and "language" in settings:
+            await self._update_language(settings["language"])
+        # Legacy support - when user changes response language, update entire pipeline
+        elif component == "llm" and "response_language" in settings:
+            new_language = settings["response_language"]
+            logger.info(f"🌍 Updating entire pipeline to language: {new_language}")
+            await self._update_language(new_language)
+            
+            # Also emit events to update STT and TTS services
+            if self._event_emitter:
+                # Update STT language
+                await self._event_emitter.emit("config_change", {
+                    "component": "stt_language_update", 
+                    "settings": {"language": new_language}
+                })
+                
+                # Update TTS voice based on language
+                if self._config:
+                    language_config = getattr(self._config, 'language_config', {})
+                    lang_settings = language_config.get(new_language, {})
+                    new_voice = lang_settings.get('voice', 'af_bella')
+                    
+                    await self._event_emitter.emit("config_change", {
+                        "component": "tts_voice_update",
+                        "settings": {"voice": new_voice}
+                    })
     
     async def _update_language(self, language: str):
         """Update the system prompt based on language"""
@@ -58,8 +80,13 @@ class LanguageHandler:
         
         self._current_language = language
         
-        # Get the appropriate system prompt
-        prompt = self._language_prompts.get(language, self._language_prompts['en'])
+        # Get system prompt from config if available
+        if self._config:
+            language_config = getattr(self._config, 'language_config', {})
+            lang_settings = language_config.get(language, language_config.get('en', {}))
+            prompt = lang_settings.get('system_prompt', self._get_fallback_prompt(language))
+        else:
+            prompt = self._get_fallback_prompt(language)
         
         # Update the context's system message
         if self._context and self._context.messages:
@@ -83,3 +110,8 @@ class LanguageHandler:
                 "language": language,
                 "prompt": prompt
             })
+    
+    def _get_fallback_prompt(self, language: str) -> str:
+        """Get fallback prompt if config is not available"""
+        fallback_prompts = self._create_language_prompts() 
+        return fallback_prompts.get(language, fallback_prompts['en'])

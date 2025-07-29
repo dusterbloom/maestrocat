@@ -273,7 +273,7 @@ class MaestroCatAgent:
         context_aggregator = self.llm.create_context_aggregator(context)
         
         # Create language handler for dynamic language updates
-        language_handler = LanguageHandler(context, self.event_emitter)
+        language_handler = LanguageHandler(context, self.event_emitter, self.config)
         
         # Build the pipeline
         pipeline = Pipeline([
@@ -317,7 +317,11 @@ class MaestroCatAgent:
             enable_usage_metrics=True
         )
         
-        task = PipelineTask(pipeline, params=task_params)
+        task = PipelineTask(
+            pipeline, 
+            params=task_params,
+            idle_timeout_secs=3600  # 1 hour timeout
+        )
         
         runner = PipelineRunner()
         

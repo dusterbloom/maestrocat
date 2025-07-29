@@ -42,7 +42,7 @@ class WhisperCppSTTService(STTService):
         
         self._model_path = model_path
         self._model_size = model_size
-        self._language = language
+        self._language = language or "en"  # Always use explicit language
         self._translate = translate
         self._use_vad = use_vad
         self._vad_threshold = vad_threshold
@@ -56,6 +56,10 @@ class WhisperCppSTTService(STTService):
         self._whisper_process = None
         self._min_audio_length = int(0.5 * sample_rate * 2)  # 0.5 seconds of audio
         self._main_loop = None  # Will be set when service starts
+        
+        # Subscribe to language updates if event emitter is available
+        if self._event_emitter:
+            self._event_emitter.subscribe("config_change", self._handle_config_change)
         
         # Whisper.cpp binary path - check common locations
         self._whisper_bin = self._find_whisper_binary()
@@ -227,20 +231,19 @@ class WhisperCppSTTService(STTService):
                 self._whisper_bin,
                 "-m", self._model_path,
                 "-f", temp_path,
-                "-l", self._language,
-                "--no-timestamps",
-                "--no-prints",  # Only output the transcription
-                "--threads", "4",
-                "--processors", "1"
+                "-t", "4",  # threads
+                "-p", "1",  # processors
+                "-nt",  # no timestamps
+                "-np",  # no prints (only output transcription)
+                "-nth", "0.8",  # higher no-speech threshold to reduce hallucinations
+                "-nf"  # no fallback (faster)
             ]
             
+            # Always use explicit language (no auto-detection)
+            cmd.extend(["-l", self._language])
+            
             if self._translate:
-                cmd.append("--translate")
-                
-            # Add VAD options if enabled (updated syntax)
-            if self._use_vad:
-                cmd.extend(["--vad"])
-                cmd.extend(["--vad-threshold", str(self._vad_threshold)])
+                cmd.append("-tr")
                 
             logger.info(f"Running whisper.cpp command: {' '.join(cmd)}")
             start_time = time.time()
@@ -315,6 +318,31 @@ class WhisperCppSTTService(STTService):
         file.write(struct.pack('<I', len(audio_data)))
         file.write(audio_data)
         
+    async def _handle_config_change(self, event: Dict[str, Any]):
+        """Handle configuration change events"""
+        try:
+            logger.info(f"🎛️ WhisperCpp config change received: {event}")
+            
+            # Extract data from the event wrapper
+            data = event.get("data", {})
+            component = data.get("component")
+            settings = data.get("settings", {})
+            
+            logger.info(f"🎛️ WhisperCpp extracted - component: {component}, settings: {settings}")
+            
+            # Handle STT language updates
+            if component == "stt_language_update" and "language" in settings:
+                new_language = settings["language"]
+                logger.info(f"🔄 WhisperCpp language change: {self._language} -> {new_language}")
+                self._language = new_language
+            elif component == "llm" and "response_language" in settings:
+                # Also handle direct language changes from LLM component
+                new_language = settings["response_language"]
+                logger.info(f"🔄 WhisperCpp language change via LLM: {self._language} -> {new_language}")
+                self._language = new_language
+        except Exception as e:
+            logger.error(f"Error handling config change in WhisperCpp: {e}")
+            
     async def _handle_transcription(self, text: str):
         """Handle transcription and create frames"""
         if not text:
@@ -371,7 +399,8 @@ class WhisperCppSTTService(STTService):
             logger.debug(f"Audio frame: {len(frame.audio)} bytes, max_amplitude: {max_amplitude}")
             
             # Process in chunks to balance latency and accuracy
-            chunk_size = int(1.0 * self._sample_rate * 2)  # 1 second chunks
+            # Use larger chunks (3 seconds) for better transcription accuracy
+            chunk_size = int(3.0 * self._sample_rate * 2)  # 3 second chunks
             
             while len(self._audio_buffer) >= chunk_size:
                 chunk_data = bytes(self._audio_buffer[:chunk_size])
@@ -383,13 +412,13 @@ class WhisperCppSTTService(STTService):
                 
                 logger.info(f"Processing audio chunk: {len(chunk_data)} bytes, max_amplitude: {max_amplitude}")
                 
-                # Only process audio with significant amplitude
-                if max_amplitude > 500:  # Threshold for speech detection (lowered to reduce false negatives)
+                # Only process audio with significant amplitude (raised threshold to reduce hallucinations)
+                if max_amplitude > 2000:  # Higher threshold for speech detection
                     logger.info(f"Audio chunk above threshold, adding to queue")
                     # Add to processing queue
                     self._audio_queue.put(chunk_data)
                 else:
-                    logger.debug(f"Audio chunk below threshold ({max_amplitude} <= 1000)")
+                    logger.debug(f"Audio chunk below threshold ({max_amplitude} <= 2000)")
                     
             # Pass the frame downstream
             await self.push_frame(frame, direction)

@@ -261,10 +261,13 @@ class MacOSPlatformStrategy(PlatformStrategy):
         stt_config = self.config.stt
         service_type = getattr(stt_config, 'service', 'whispercpp')
         
-        model_size = getattr(stt_config, 'model_size', 'base')
-        language = getattr(stt_config, 'language', 'en')
-        if language == 'auto':
-            language = 'en'  # Default to English for auto detection
+        model_size = getattr(stt_config, 'model_size', 'small')
+        
+        # Get language from unified language config
+        current_language = getattr(self.config, 'language', 'en')
+        language_config = getattr(self.config, 'language_config', {})
+        lang_settings = language_config.get(current_language, language_config.get('en', {}))
+        language = lang_settings.get('stt_language', 'en')
         
         # Lightning Whisper MLX for M4 optimization (5-10x faster)
         if service_type == 'lightning_whisper_mlx':
@@ -370,10 +373,16 @@ class MacOSPlatformStrategy(PlatformStrategy):
         tts_config = self.config.tts
         tts_service = getattr(tts_config, 'service', 'macos')
         
+        # Get voice from unified language config
+        current_language = getattr(self.config, 'language', 'en')
+        language_config = getattr(self.config, 'language_config', {})
+        lang_settings = language_config.get(current_language, language_config.get('en', {}))
+        voice = lang_settings.get('voice', 'af_bella')
+        
         if tts_service == 'macos':
-            logger.info(f"Creating macOS System TTS with voice: {tts_config.voice}")
+            logger.info(f"Creating macOS System TTS with voice: {voice}")
             return MacOSTTSService(
-                voice=tts_config.voice,
+                voice=voice,
                 rate=getattr(tts_config, 'rate', 180),
                 volume=getattr(tts_config, 'volume', 0.9),
                 sample_rate=getattr(tts_config, 'sample_rate', 22050),
@@ -391,11 +400,11 @@ class MacOSPlatformStrategy(PlatformStrategy):
             )
         
         elif tts_service == 'native_kokoro':
-            logger.info(f"Creating Native Kokoro ONNX TTS with voice: {tts_config.voice}")
+            logger.info(f"Creating Native Kokoro ONNX TTS with voice: {voice}")
             try:
                 from ..services.native_kokoro_tts import NativeKokoroTTSService
                 return NativeKokoroTTSService(
-                    voice=tts_config.voice,
+                    voice=voice,
                     speed=getattr(tts_config, 'speed', 1.0),
                     sample_rate=getattr(tts_config, 'sample_rate', 24000),
                     event_emitter=event_emitter
@@ -445,14 +454,15 @@ class MacOSPlatformStrategy(PlatformStrategy):
         )
     
     def get_system_prompt(self) -> str:
-        """Get system prompt optimized for macOS performance"""
-        base_prompt = getattr(self.config.llm, 'system_prompt',
-            "You are MaestroCat, a helpful AI voice assistant. "
-            "Keep responses very brief and conversational. If interrupted, acknowledge it naturally.")
+        """Get system prompt from unified language config"""
+        # Get current language and corresponding system prompt
+        current_language = getattr(self.config, 'language', 'en')
+        language_config = getattr(self.config, 'language_config', {})
+        lang_settings = language_config.get(current_language, language_config.get('en', {}))
         
-        # macOS native services are typically faster, but still encourage brevity
-        # for real-time voice interaction
-        return base_prompt
+        return lang_settings.get('system_prompt', 
+            "You are MaestroCat, a helpful AI voice assistant. "
+            "Keep responses brief and conversational for real-time voice interaction.")
     
     async def apply_platform_optimizations(self) -> Dict[str, Any]:
         """Apply macOS-specific optimizations"""

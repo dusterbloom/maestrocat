@@ -1,6 +1,32 @@
 # MaestroCat Unified Configuration
 # This configuration works across all platforms with platform-specific sections
 
+# Universal language setting - controls entire pipeline
+language: "it"  # Options: en, it, fr, es, pt, ja, zh
+
+# Language-specific configurations
+language_config:
+  en:
+    voice: "af_bella"
+    stt_language: "en"
+    system_prompt: "You are MaestroCat, a helpful AI voice assistant. Keep responses brief and conversational for real-time voice interaction. If interrupted, acknowledge it naturally and continue."
+  it:
+    voice: "if_sara"
+    stt_language: "it"
+    system_prompt: "Sei MaestroCat, un assistente vocale AI utile. Rispondi sempre in italiano. Mantieni le risposte brevi e conversazionali. Se vengo interrotto, riconoscilo naturalmente."
+  fr:
+    voice: "ff_siwis"
+    stt_language: "fr"
+    system_prompt: "Tu es MaestroCat, un assistant vocal IA utile. Réponds toujours en français. Garde tes réponses brèves et conversationnelles. Si tu es interrompu, reconnais-le naturellement."
+  es:
+    voice: "af_bella"  # Fallback to English voice for now
+    stt_language: "es"
+    system_prompt: "Eres MaestroCat, un asistente de voz AI útil. Responde siempre en español. Mantén las respuestas breves y conversacionales. Si te interrumpen, reconócelo naturalmente."
+  pt:
+    voice: "af_bella"  # Fallback to English voice for now
+    stt_language: "pt"
+    system_prompt: "Você é MaestroCat, um assistente de voz AI útil. Responda sempre em português. Mantenha as respostas breves e conversacionais. Se for interrompido, reconheça naturalmente."
+
 # Core VAD settings (used by all platforms)
 vad:
   energy_threshold: 0.5
@@ -9,7 +35,6 @@ vad:
 
 # Base STT configuration
 stt:
-  language: "en"
   translate: false
 
 # Base LLM configuration  
@@ -19,14 +44,9 @@ llm:
   max_tokens: 400
   top_p: 0.9
   top_k: 40
-  system_prompt: |
-    You are MaestroCat, a helpful AI voice assistant. 
-    Keep responses brief and conversational for real-time voice interaction.
-    If interrupted, acknowledge it naturally and continue.
 
 # Base TTS configuration
 tts:
-  voice: "af_bella"
   speed: 1.0
 
 # Interruption handling (universal)
@@ -92,12 +112,11 @@ platforms:
   # macOS native platform configuration  
   macos_native:
     stt:
-      service: "mlx_whisper"             # Standard MLX Whisper for real-time performance
-      model_size: "medium"               # Using medium for faster STT processing (testing turn metrics)  
+      service: "whispercpp"              # Native whisper.cpp for best latency
+      model_size: "small"                # Small model for good accuracy
       sample_rate: 16000
-      compute_type: "float16"            # Options: float16, int8, int4
-      batch_size: 1                      # Increase for batch processing
-      beam_size: 1                       # 1 for fastest, 5 for better accuracy
+      use_vad: true                      # Enable voice activity detection
+      vad_threshold: 0.5                 # VAD sensitivity
     
     llm:
       base_url: "http://localhost:11434"
@@ -156,8 +175,8 @@ platforms:
     
     # VAD optimized for native performance
     vad:
-      min_speech_ms: 150     # Faster detection
-      pause_ms: 1500         # Allow longer pauses for complete sentences
+      min_speech_ms: 150     # Faster detection (reduced from 250)
+      pause_ms: 800          # Balanced pause detection (reduced from 1000)
 
   # WSL platform configuration (extends Docker)
   wsl:
