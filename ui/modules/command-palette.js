@@ -123,8 +123,8 @@ export class CommandPalette extends EventEmitter {
     });
     
     this.register({
-      id: 'switch-model-mistral',
-      name: 'Switch to Mistral 7B',
+      id: 'switch-model-qwen3',
+      name: 'Switch to Qwen3 8B',
       category: 'Models',
       action: () => this.switchModel('qwen3:8b')
     });
