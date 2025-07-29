@@ -126,7 +126,7 @@ export class CommandPalette extends EventEmitter {
       id: 'switch-model-mistral',
       name: 'Switch to Mistral 7B',
       category: 'Models',
-      action: () => this.switchModel('mistral:7b')
+      action: () => this.switchModel('qwen3:8b')
     });
     
     // View commands
