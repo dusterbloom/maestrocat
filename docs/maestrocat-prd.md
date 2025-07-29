@@ -223,7 +223,7 @@ models:
   llm:
     ollama:
       base_url: "http://localhost:11434"
-      models: ["llama3.2:3b", "llama3.2:7b", "mistral:7b"]
+      models: ["llama3.2:3b", "llama3.2:7b", "qwen3:8b"]
       default: "llama3.2:3b"
   tts:
     piper:

@@ -13,6 +13,7 @@ Features:
 - Comprehensive health checking and setup validation
 - Clean command-line interface
 - Backward compatibility with existing configurations
+- Robust signal handling for graceful shutdown
 """
 
 import asyncio
@@ -27,12 +28,13 @@ from typing import Optional
 sys.path.append(str(Path(__file__).parent))
 
 from core.platform import (
-    MaestroCatAgent, 
-    PlatformDetector, 
+    MaestroCatAgent,
+    PlatformDetector,
     ServiceFactory,
     PlatformType
 )
 from core.platform.config import UnifiedMaestroCatConfig
+from core.platform.signal_handler import get_signal_handler, setup_signal_handlers
 
 # Configure logging
 logging.basicConfig(
@@ -45,14 +47,14 @@ logger = logging.getLogger(__name__)
 class MaestroCatLauncher:
     """
     Unified launcher for MaestroCat that handles platform detection,
-    service setup, and agent lifecycle management.
+    service setup, and agent lifecycle management with robust signal handling.
     """
     
     def __init__(self):
         self.agent = None
         self.platform_info = None
-        self._shutdown_event = None
-    
+        self.signal_handler = get_signal_handler()
+        
     async def check_platform_compatibility(self, 
                                          platform_type: Optional[PlatformType] = None) -> bool:
         """
@@ -183,13 +185,13 @@ class MaestroCatLauncher:
         
         return True
     
-    async def run_agent(self, 
+    async def run_agent(self,
                        config_file: Optional[str] = None,
                        platform_type: Optional[PlatformType] = None,
                        host: str = "0.0.0.0",
                        port: int = 8765) -> int:
         """
-        Run the MaestroCat agent.
+        Run the MaestroCat agent with robust signal handling.
         
         Args:
             config_file: Path to configuration file
@@ -209,12 +211,15 @@ class MaestroCatLauncher:
             
             logger.info(f"📄 Loaded configuration: {config}")
             
-            # Create and run agent
+            # Create agent
             self.agent = MaestroCatAgent(config=config, platform_override=platform_type)
+            
+            # Register agent with signal handler
+            self.signal_handler.register_agent(self.agent)
             
             logger.info("🎭 Starting MaestroCat Universal Agent...")
             
-            # Run agent - it handles its own shutdown
+            # Run agent with signal handling
             await self.agent.run(host=host, websocket_port=port)
             
             return 0
@@ -226,7 +231,7 @@ class MaestroCatLauncher:
             logger.error(f"❌ Error running MaestroCat: {e}")
             return 1
         finally:
-            if self.agent:
+            if self.agent and not self.signal_handler.is_shutting_down():
                 logger.info("🧹 Cleaning up MaestroCat Agent...")
                 await self.agent.cleanup()
                 logger.info("✅ Cleanup complete")
@@ -255,7 +260,7 @@ class MaestroCatLauncher:
 
 
 def main():
-    """Main entry point"""
+    """Main entry point with robust signal handling"""
     parser = argparse.ArgumentParser(
         description="MaestroCat Universal Launcher - Platform-agnostic voice AI agent",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -376,15 +381,20 @@ Configuration:
             port=args.port
         )
     
-    # Run the launcher
+    # Run the launcher with signal handling
     try:
+        # Set up signal handlers
+        setup_signal_handlers()
+        
+        # Run the main async function
         exit_code = asyncio.run(run())
         sys.exit(exit_code)
+        
     except KeyboardInterrupt:
         print("\n👋 Goodbye!")
         sys.exit(0)
     except Exception as e:
-        logger.error(f"Fatal error: {e}")
+        logger.error(f"❌ Fatal error: {e}")
         sys.exit(1)
 
 
