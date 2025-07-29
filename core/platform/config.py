@@ -54,6 +54,7 @@ class UnifiedSTTConfig:
     channels: int = 1
     block_size: int = 512
     max_latency_ms: int = 200
+    preload_model: bool = True  # Pre-load model during startup for instant transcription
 
 
 @dataclass

@@ -10,7 +10,7 @@ from typing import AsyncGenerator, Optional, Dict, Any, List
 from dataclasses import dataclass
 from enum import Enum
 
-from pipecat.frames.frames import Frame, TranscriptionFrame, StartInterruptionFrame
+from pipecat.frames.frames import Frame, TranscriptionFrame
 from pipecat.services.stt_service import STTService
 
 logger = logging.getLogger(__name__)
@@ -213,7 +213,7 @@ class WhisperCppStreamingSTTService(STTService):
         *,
         model_path: str = None,
         model_size: str = "base",
-        language: str = "auto",
+        language: str = "en",
         translate: bool = False,
         sample_rate: int = 16000,
         channels: int = 1,
@@ -221,7 +221,7 @@ class WhisperCppStreamingSTTService(STTService):
         max_latency_ms: int = 200,
         step_ms: int = 1000,
         length_ms: int = 5000,
-        keep_ms: int = 200,
+        keep_ms: int = 500,
         voice_threshold: float = 0.8,
         threads: int = 6,
         event_emitter=None,
@@ -252,7 +252,7 @@ class WhisperCppStreamingSTTService(STTService):
         
         # Utterance boundary detection
         self._boundary_detector = UtteranceBoundaryDetector(
-            silence_threshold_ms=600.0,  # 600ms gap indicates utterance boundary
+            silence_threshold_ms=1200.0,  # 600ms gap indicates utterance boundary
             completion_timeout_ms=2500.0,  # 2.5s timeout for incomplete utterances
             min_utterance_length=3  # Minimum 3 characters for valid utterance
         )
@@ -295,10 +295,23 @@ class WhisperCppStreamingSTTService(STTService):
         # Ensure model exists
         self._ensure_model()
         
+        # Validate language setting
+        if self._language and self._language.lower() == "auto":
+            logger.warning("\u26a0\ufe0f  WhisperCpp stream tool doesn't support 'auto' language detection")
+            logger.warning("\u26a0\ufe0f  Please specify a language code (e.g., 'en', 'it', 'es', 'fr', etc.)")
+            logger.warning("\u26a0\ufe0f  Defaulting to English ('en') for now")
+            self._language = "en"
+        
         # Subscribe to config change events if event emitter is available
         if self._event_emitter:
             self._event_emitter.subscribe("config_change", self._handle_config_change)
             logger.info("🔔 Subscribed to config_change events for dynamic language updates")
+        
+        # Pre-loading state
+        self._is_preloaded = False
+        self._preload_task = None
+        self._initialization_complete = False
+        self._model_load_complete = False
         
         logger.info(f"Initialized WhisperCppStreamingSTTService with model: {self._model_path}")
         logger.info(f"🌍 Initial language setting: '{self._language}', Auto-detect: {self._language == 'auto'}")
@@ -370,10 +383,64 @@ class WhisperCppStreamingSTTService(STTService):
             f"Please download the model manually or use whisper.cpp's download script."
         )
             
+    async def _preload_model(self):
+        """Pre-load the Whisper.cpp model by starting the streaming process early"""
+        if self._is_preloaded:
+            logger.info("📋 Whisper.cpp model already pre-loaded")
+            return
+        
+        logger.info("🚀 Pre-loading Whisper.cpp streaming model...")
+        
+        try:
+            # Reset initialization tracking flags
+            self._initialization_complete = False
+            self._model_load_complete = False
+            
+            # Start the streaming process without waiting for WebSocket connection
+            self._start_streaming_process()
+            
+            # Wait for proper initialization completion
+            max_wait = 15.0  # Increased timeout for thorough initialization
+            wait_interval = 0.1
+            total_waited = 0.0
+            
+            logger.info("⏳ Waiting for model initialization to complete...")
+            
+            while total_waited < max_wait:
+                if not (self._whisper_process and self._whisper_process.poll() is None and self._is_running):
+                    logger.error("❌ Whisper process died during pre-loading")
+                    return
+                
+                # Check if initialization is truly complete
+                if self._initialization_complete and self._model_load_complete:
+                    # Give it a small additional buffer to ensure everything is settled
+                    await asyncio.sleep(0.5)
+                    self._is_preloaded = True
+                    logger.info("✅ Whisper.cpp model pre-loaded and ready for instant transcription")
+                    return
+                
+                await asyncio.sleep(wait_interval)
+                total_waited += wait_interval
+            
+            # Fallback: if we can't detect completion but process is running, assume ready
+            if self._whisper_process and self._whisper_process.poll() is None and self._is_running:
+                logger.warning("⚠️  Could not detect initialization completion, but process is running - assuming ready")
+                self._is_preloaded = True
+            else:
+                logger.error("❌ Whisper.cpp pre-loading failed - process not running or timed out")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to pre-load Whisper.cpp model: {e}")
+            
     def _start_streaming_process(self):
         """Start the whisper.cpp streaming process"""
         if self._whisper_process and self._whisper_process.poll() is None:
+            logger.debug("🔄 Whisper.cpp process already running, skipping start")
             return
+            
+        # Reset initialization tracking flags for new process
+        self._initialization_complete = False
+        self._model_load_complete = False
             
         cmd = [
             self._stream_binary,
@@ -388,20 +455,20 @@ class WhisperCppStreamingSTTService(STTService):
             "-nf",  # No temperature fallback to reduce hallucinations
         ]
         
-        # Handle language setting - only add -l flag if not auto-detecting
-        if self._language and self._language.lower() != "auto":
+        # Handle language setting - always specify a language (stream tool doesn't support auto)
+        if self._language and self._language.lower() == "auto":
+            # Stream tool doesn't support auto detection - default to English
+            cmd.extend(["-l", "en"])
+            logger.warning("⚠️  Stream tool doesn't support 'auto' - defaulting to English")
+            logger.warning("⚠️  For multilingual support, specify a language explicitly")
+        else:
             cmd.extend(["-l", self._language])
             logger.info(f"🌍 Using explicit language: {self._language}")
-        else:
-            logger.info("🤖 Using automatic language detection - whisper will detect and transcribe in detected language")
         
         # Add keep-context flag for better language consistency (based on whisper-stream help)
         if not self._translate and self._language and self._language.lower() not in ["en", "auto"]:
             cmd.append("-kc")  # Keep context between chunks for consistency
             logger.info("🔗 Added --keep-context flag for language consistency")
-        elif self._language and self._language.lower() == "auto":
-            cmd.append("-kc")  # Always use keep-context for auto-detection to maintain consistency
-            logger.info("🔗 Added --keep-context flag for auto-detection consistency")
         
         # Debug: Log language and translate settings for troubleshooting
         logger.info(f"🌍 Language setting: '{self._language}', Translate: {self._translate}")
@@ -562,7 +629,7 @@ class WhisperCppStreamingSTTService(STTService):
                 return None
         
         # Check for high similarity (likely overlapping chunks)
-        for prev_text, timestamp in self._transcription_buffer:
+        for prev_text, _ in self._transcription_buffer:
             similarity = self._calculate_text_similarity(text, prev_text)
             
             if similarity > self._overlap_threshold:
@@ -596,6 +663,12 @@ class WhisperCppStreamingSTTService(STTService):
                 new_language = settings["language"]
                 logger.info(f"🔄 STT language change requested: {self._language} -> {new_language}")
                 
+                # Validate language setting
+                if new_language and new_language.lower() == "auto":
+                    logger.warning("⚠️  WhisperCpp stream tool doesn't support 'auto' language detection")
+                    logger.warning(f"⚠️  Ignoring auto setting - keeping current language: {self._language}")
+                    return
+                
                 if new_language != self._language:
                     self._config_language = new_language
                     self._language = new_language
@@ -613,6 +686,12 @@ class WhisperCppStreamingSTTService(STTService):
                 # Handle unified language updates
                 new_language = str(settings) if isinstance(settings, str) else settings.get("language", settings)
                 logger.info(f"🌍 User language change: {self._language} -> {new_language}")
+                
+                # Validate language setting
+                if new_language and new_language.lower() == "auto":
+                    logger.warning("⚠️  WhisperCpp stream tool doesn't support 'auto' language detection")
+                    logger.warning(f"⚠️  Ignoring auto setting - keeping current language: {self._language}")
+                    return
                 
                 if new_language != self._language:
                     self._config_language = new_language
@@ -670,10 +749,10 @@ class WhisperCppStreamingSTTService(STTService):
                     break
                     
                 transcript = line.strip()
-                logger.debug(f"Raw stdout line: '{transcript}'")
+                # logger.debug(f"Raw stdout line: '{transcript}'")
                 
                 if transcript:
-                    logger.info(f"Processing transcription: '{transcript}'")
+                    # logger.info(f"Processing transcription: '{transcript}'")
                     self._process_transcription_line(transcript)
                     
         except Exception as e:
@@ -682,7 +761,7 @@ class WhisperCppStreamingSTTService(STTService):
         logger.info("Stdout reader thread ending")
                 
     def _read_stderr(self):
-        """Read stderr for debugging"""
+        """Read stderr for debugging and initialization tracking"""
         logger.info("Starting stderr reader thread")
         
         try:
@@ -692,6 +771,9 @@ class WhisperCppStreamingSTTService(STTService):
                     
                 line = line.strip()
                 if line:
+                    # Track initialization progress
+                    self._track_initialization_progress(line)
+                    
                     if "error" in line.lower():
                         logger.error(f"Whisper.cpp stderr ERROR: {line}")
                     else:
@@ -701,6 +783,33 @@ class WhisperCppStreamingSTTService(STTService):
             logger.error(f"Error reading stderr: {e}")
             
         logger.info("Stderr reader thread ending")
+        
+    def _track_initialization_progress(self, line: str):
+        """Track whisper.cpp initialization progress through stderr messages"""
+        line_lower = line.lower()
+        
+        # Track key initialization milestones
+        if "whisper_model_load: model size" in line_lower:
+            # Model file loading is complete
+            self._model_load_complete = True
+            logger.debug("🔄 Model file loading complete")
+            
+        elif "compute buffer (decode)" in line_lower:
+            # All compute buffers allocated - this is typically the last step
+            self._initialization_complete = True
+            logger.debug("🔄 All compute buffers allocated - initialization nearly complete")
+            
+        elif "main: processing" in line_lower and "samples" in line_lower:
+            # Processing loop started - definitely ready
+            if self._model_load_complete:
+                self._initialization_complete = True
+                logger.debug("🔄 Processing loop started - fully initialized")
+                
+        elif "main: n_new_line" in line_lower:
+            # Final initialization message - definitely ready
+            if self._model_load_complete:
+                self._initialization_complete = True
+                logger.debug("🔄 Final initialization complete")
                 
     def _process_transcription_line(self, line: str):
         """Process a transcription line from whisper.cpp using utterance boundary detection"""
@@ -921,7 +1030,13 @@ class WhisperCppStreamingSTTService(STTService):
         await super().start(frame)
         # Capture the current event loop for thread-safe async calls
         self._loop = asyncio.get_event_loop()
-        self._start_streaming_process()
+        
+        # Only start the process if not already preloaded
+        if not self._is_preloaded:
+            logger.info("🚀 Starting Whisper.cpp process (not pre-loaded)")
+            self._start_streaming_process()
+        else:
+            logger.info("✅ Using pre-loaded Whisper.cpp process")
         
         # Start timeout checker task
         self._timeout_checker_task = asyncio.create_task(self._timeout_checker_loop())

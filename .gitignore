@@ -32,3 +32,5 @@ mlx_models/
 .cache/
 
 logs/
+
+whisper.cpp/

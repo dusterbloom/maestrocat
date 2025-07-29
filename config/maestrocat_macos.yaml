@@ -18,13 +18,14 @@ stt:
   vad_threshold: 0.5      # VAD sensitivity
   
   # Streaming STT specific settings
-  model_path: "models/ggml-base.bin"  # Path to whisper.cpp model
+  model_path: "models/ggml-medium.bin"  # Path to whisper.cpp model
   block_size: 512        # Audio block size for streaming
   threads: 6             # Number of threads for whisper.cpp
   step_ms: 1000          # Fixed time steps in ms (1000 = 1 second, prevents overlap)
   length_ms: 5000        # Context window length in ms (5000 = 5 seconds)
-  keep_ms: 200           # Context retention between chunks in ms
+  keep_ms: 500           # Context retention between chunks in ms
   voice_threshold: 0.8   # Voice activity detection threshold (0.0-1.0)
+  preload_model: true    # Pre-load model during startup for instant transcription
 
 # Native Ollama LLM
 llm:
