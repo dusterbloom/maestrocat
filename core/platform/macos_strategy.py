@@ -18,6 +18,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
 from ..services.whispercpp_stt import WhisperCppSTTService
+from ..services.whispercpp_streaming_stt import WhisperCppStreamingSTTService
 
 from .strategy import PlatformStrategy, PlatformType, PlatformInfo, PlatformCapabilities, ServiceSpecs
 from ..services.ollama_llm import OLLamaLLMService
@@ -329,6 +330,35 @@ class MacOSPlatformStrategy(PlatformStrategy):
             except ImportError:
                 logger.warning("MLX Whisper not available, falling back to WhisperCpp")
                 service_type = 'whispercpp'
+        
+        # Streaming WhisperCpp (real-time continuous transcription)
+        if service_type == 'whispercpp_streaming':
+            # Map unsupported models to WhisperCpp equivalents
+            whispercpp_model_mapping = {
+                "distil-large-v3": "large",  # Use large-v3 as fallback
+                "large-v3": "large",
+                "distil-medium": "medium",
+                "distil-small": "small"
+            }
+            
+            whispercpp_model = whispercpp_model_mapping.get(model_size, model_size)
+            logger.info(f"Creating WhisperCpp Streaming STT with model: {whispercpp_model}")
+            
+            return WhisperCppStreamingSTTService(
+                model_size=whispercpp_model,
+                language=language,
+                translate=getattr(stt_config, 'translate', False),
+                sample_rate=getattr(stt_config, 'sample_rate', 16000),
+                channels=getattr(stt_config, 'channels', 1),
+                block_size=getattr(stt_config, 'block_size', 512),
+                max_latency_ms=getattr(stt_config, 'max_latency_ms', 200),
+                step_ms=getattr(stt_config, 'step_ms', 1000),
+                length_ms=getattr(stt_config, 'length_ms', 5000),
+                keep_ms=getattr(stt_config, 'keep_ms', 200),
+                voice_threshold=getattr(stt_config, 'voice_threshold', 0.8),
+                threads=getattr(stt_config, 'threads', 6),
+                event_emitter=event_emitter
+            )
         
         # Default: WhisperCpp (still fast, but not as optimized as MLX)
         # Map unsupported models to WhisperCpp equivalents

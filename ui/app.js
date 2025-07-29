@@ -9,6 +9,7 @@ import { ShortcutsManager } from './modules/shortcuts.js';
 import { CommandPalette } from './modules/command-palette.js';
 import { EventManager } from './modules/events.js';
 import { StateManager } from './modules/state.js';
+import { TranscriptionManager } from './modules/transcription.js';
 
 class MaestroCatDebugApp {
   constructor() {
@@ -19,6 +20,7 @@ class MaestroCatDebugApp {
     this.websocket = new WebSocketManager(this.state);
     this.audio = new AudioManager(this.state);
     this.ui = new UIManager(this.state);
+    this.transcription = new TranscriptionManager(this.state);
     this.metrics = new MetricsManager(this.state);
     this.config = new ConfigManager(this.state);
     this.shortcuts = new ShortcutsManager(this.state);
@@ -33,6 +35,29 @@ class MaestroCatDebugApp {
   }
   
   bindManagers() {
+    // Debug logging
+    console.log('Binding managers...');
+    console.log('this.ui:', this.ui);
+    console.log('this.ui constructor:', this.ui.constructor.name);
+    console.log('this.ui prototype methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(this.ui)));
+    console.log('this.ui.setTranscriptionManager:', typeof this.ui?.setTranscriptionManager);
+    console.log('this.transcription:', this.transcription);
+    
+    // Connect transcription manager to UI
+    if (this.ui && typeof this.ui.setTranscriptionManager === 'function') {
+      this.ui.setTranscriptionManager(this.transcription);
+      console.log('✅ Successfully connected transcription manager to UI');
+    } else {
+      console.error('❌ UIManager not properly initialized or missing setTranscriptionManager method');
+      // Try to call it anyway in case the method exists but typeof is wrong
+      try {
+        this.ui.setTranscriptionManager(this.transcription);
+        console.log('✅ Method call succeeded despite typeof check failure');
+      } catch (error) {
+        console.error('❌ Method call failed:', error);
+      }
+    }
+    
     // WebSocket events
     this.websocket.on('connected', () => {
       this.ui.updateConnectionStatus('ws', true);
@@ -120,11 +145,13 @@ class MaestroCatDebugApp {
     // Handle specific event types
     switch(event.type) {
       case 'transcription_partial':
-        // No longer displaying partial transcriptions
+        // Handle streaming partial transcriptions
+        this.ui.updateTranscription('partial', event.data);
         break;
         
       case 'transcription_final':
         this.ui.addMessage('user', event.data.text);
+        this.ui.updateTranscription('final', event.data);
         // Try to auto-detect language change from user transcription
         this.config.autoDetectLanguageFromTranscription(event.data.text);
         break;
@@ -356,6 +383,7 @@ class MaestroCatDebugApp {
     
     // Initialize all managers
     await this.ui.init();
+    await this.transcription.init();
     await this.config.init();
     await this.shortcuts.init();
     await this.commandPalette.init();

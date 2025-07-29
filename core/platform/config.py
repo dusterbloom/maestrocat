@@ -49,6 +49,11 @@ class UnifiedSTTConfig:
     compute_type: str = "float16"  # float16, int8, int4
     batch_size: int = 1
     beam_size: int = 1
+    
+    # Streaming STT specific settings
+    channels: int = 1
+    block_size: int = 512
+    max_latency_ms: int = 200
 
 
 @dataclass

@@ -15,11 +15,22 @@ export class TranscriptionManager extends EventEmitter {
   }
   
   async init() {
-    this.container = document.getElementById('transcription-view');
+    // Try to find a transcription-specific element, fallback to conversation view
+    this.container = document.getElementById('transcription-view') || 
+                     document.getElementById('conversation-view');
     this.liveIndicator = document.querySelector('.live-indicator');
     
-    // Clear placeholder
-    this.container.innerHTML = '';
+    if (!this.container) {
+      console.warn('No transcription container found. Available elements:', 
+        Array.from(document.querySelectorAll('[id*="transcription"], [id*="conversation"]'))
+          .map(el => el.id));
+      return;
+    }
+    
+    // Clear placeholder if container exists
+    if (this.container.innerHTML.trim() === '') {
+      this.container.innerHTML = '<div class="transcription-placeholder">Listening for speech...</div>';
+    }
   }
   
   setLive(isLive) {
@@ -58,6 +69,11 @@ export class TranscriptionManager extends EventEmitter {
     }
   }
   
+  updateTranscription(data) {
+    // Alias for updatePartial to maintain compatibility
+    this.updatePartial(data);
+  }
+
   finalize(data) {
     const { text, confidence = 1.0, timestamp } = data;
     

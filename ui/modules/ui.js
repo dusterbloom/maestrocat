@@ -4,11 +4,18 @@ import { EventEmitter } from './event-emitter.js';
 
 export class UIManager extends EventEmitter {
   constructor(state) {
-    super();
-    this.state = state;
-    this.elements = {};
-    this.currentAssistantMessage = null;
-    this.toastQueue = [];
+    try {
+      super();
+      console.log('UIManager constructor called with state:', state);
+      this.state = state;
+      this.elements = {};
+      this.currentAssistantMessage = null;
+      this.toastQueue = [];
+      console.log('UIManager constructor completed successfully');
+    } catch (error) {
+      console.error('UIManager constructor failed:', error);
+      throw error;
+    }
   }
   
   async init() {
@@ -324,6 +331,27 @@ export class UIManager extends EventEmitter {
   // Query all helper
   queryAll(selector) {
     return document.querySelectorAll(selector);
+  }
+  
+  setTranscriptionManager(transcriptionManager) {
+    console.log('📝 setTranscriptionManager called with:', transcriptionManager);
+    this.transcriptionManager = transcriptionManager;
+    console.log('📝 transcriptionManager set successfully');
+  }
+  
+  updateTranscription(type, data) {
+    // Forward to transcription manager if available
+    if (this.transcriptionManager) {
+      if (type === 'partial') {
+        this.transcriptionManager.updatePartial(data);
+      } else if (type === 'final') {
+        this.transcriptionManager.finalize(data);
+      }
+    }
+    // Fallback: log if transcription manager not available
+    else {
+      console.debug(`Transcription ${type}:`, data);
+    }
   }
 }
 

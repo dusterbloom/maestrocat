@@ -112,9 +112,12 @@ platforms:
   # macOS native platform configuration  
   macos_native:
     stt:
-      service: "whispercpp"              # Native whisper.cpp for best latency
+      service: "whispercpp_streaming"    # Streaming whisper.cpp for real-time transcription
       model_size: "small"                # Small model for good accuracy
       sample_rate: 16000
+      channels: 1                        # Mono audio
+      block_size: 512                    # Audio chunk size (512 = responsive)
+      max_latency_ms: 200               # Maximum acceptable latency
       use_vad: true                      # Enable voice activity detection
       vad_threshold: 0.5                 # VAD sensitivity
     
