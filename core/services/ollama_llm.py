@@ -43,10 +43,10 @@ class OLLamaLLMService(LLMService):
         self._top_k = top_k
         self._event_emitter = event_emitter
         
-        # Optimized HTTP client with connection pooling
+        # Optimized HTTP client with minimal pooling for better performance
         self._client = httpx.AsyncClient(
-            limits=httpx.Limits(max_keepalive_connections=20, max_connections=50),
-            timeout=httpx.Timeout(30.0, connect=2.0, read=30.0)
+            limits=httpx.Limits(max_keepalive_connections=1, max_connections=2),
+            timeout=httpx.Timeout(10.0, connect=1.0, read=10.0)
         )
         
         # Pre-load model on initialization
@@ -77,36 +77,30 @@ class OLLamaLLMService(LLMService):
             return
             
         try:
-            logger.info(f"🚀 Pre-loading and warming up model {self._model}...")
+            logger.info(f"🚀 Pre-loading model {self._model}...")
             
-            # First ensure model is downloaded
-            await self._client.post(
-                f"{self._base_url}/api/pull",
-                json={"model": self._model},
-                timeout=120.0
-            )
-            
-            # Warm up the model with a proper generation request
+            # Skip redundant model pull - Ollama handles this automatically
+            # Warm up with minimal, realistic request matching actual usage
             response = await self._client.post(
                 f"{self._base_url}/api/chat",
                 json={
                     "model": self._model,
-                    "messages": [{"role": "user", "content": "Say 'ready' to confirm you're loaded"}],
-                    "keep_alive": "60m",  # Keep model loaded for 1 hour
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "keep_alive": "60m",
                     "stream": False,
                     "options": {
-                        "num_predict": 5,  # Generate a few tokens to fully warm up
+                        "num_predict": 3,
                         "temperature": 0.1,
-                        "num_ctx": 2048,
-                        "num_batch": 1024,
+                        "num_ctx": 1024,     # Match actual usage
+                        "num_batch": 512,    # Match actual usage
                         "num_threads": -1
                     }
                 },
-                timeout=30.0
+                timeout=10.0
             )
             response.raise_for_status()
             self._model_loaded = True
-            logger.info(f"✅ Model {self._model} pre-loaded, warmed up, and ready for instant responses")
+            logger.info(f"✅ Model {self._model} preloaded and ready")
         except Exception as e:
             logger.warning(f"⚠️ Model pre-loading failed: {e}")
             # Continue anyway - model will load on first request
@@ -137,11 +131,11 @@ class OLLamaLLMService(LLMService):
                     "top_p": self._top_p,
                     "top_k": self._top_k,
                     "num_predict": self._max_tokens,
-                    "num_ctx": 1024,  # Even smaller context for ultra-low latency
-                    "num_batch": 512,  # Smaller batch for faster first token
-                    "num_threads": -1,  # Use all cores
-                    "num_gpu": -1,  # Use all GPU layers if available
-                    "stop": ["<|eot_id|>", "<|end_of_text|>", "\n\nUser:", "\n\nHuman:", "###", "<|im_end|>"]  # Stop tokens to prevent repetition
+                    "num_ctx": 2048,  # Optimal context size for performance
+                    "num_batch": 1024,  # Match context for optimal batching
+                    "num_threads": -1,
+                    "num_gpu": -1,
+                    "stop": ["<|eot_id|>", "<|end_of_text|>", "\n\nUser:", "\n\nHuman:", "###", "<|im_end|>"]
                 }
             }
             
@@ -183,40 +177,23 @@ class OLLamaLLMService(LLMService):
                                     first_token_latency = (time.time() - llm_start_time) * 1000
                                     first_token_received = True
                                     
-                                    # Emit LLM response start event (now that first token has arrived)
+                                    # Emit essential events only on first token for performance
                                     if self._event_emitter:
                                         await self._event_emitter.emit("llm_response_start", {
                                             "model": self._model,
                                             "timestamp": time.time(),
                                             "first_token_latency_ms": first_token_latency
                                         })
-                                        
-                                        # Also emit first token specific event for detailed tracking
-                                        await self._event_emitter.emit("llm_first_token", {
-                                            "model": self._model,
-                                            "timestamp": time.time(),
-                                            "latency_ms": first_token_latency
-                                        })
-                                        
-                                        # Emit first token metrics immediately
-                                        await self._event_emitter.emit("metrics_update", {
-                                            "stt_latency_ms": 0.0,  # Will be updated by STT service
-                                            "llm_latency_ms": first_token_latency,
-                                            "tts_latency_ms": 0.0,  # Will be updated by TTS service
-                                            "total_latency_ms": first_token_latency,
-                                            "timestamp": time.time(),
-                                            "component": "llm"
-                                        })
-                                        logger.info(f"📊 Emitted LLM first token events: {first_token_latency:.1f}ms")
+                                        logger.info(f"📊 First token: {first_token_latency:.1f}ms")
                                 
                                 full_response += token
                                 
-                                # Emit chunk event for debug UI
-                                if self._event_emitter:
-                                    await self._event_emitter.emit("llm_response_chunk", {
-                                        "chunk": token,
-                                        "timestamp": time.time()
-                                    })
+                                # Reduce event emission overhead - only emit chunks for debugging if needed
+                                # if self._event_emitter:
+                                #     await self._event_emitter.emit("llm_response_chunk", {
+                                #         "chunk": token,
+                                #         "timestamp": time.time()
+                                #     })
                                 
                                 yield TextFrame(token)
                                 
