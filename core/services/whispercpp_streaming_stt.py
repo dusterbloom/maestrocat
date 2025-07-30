@@ -219,11 +219,11 @@ class WhisperCppStreamingSTTService(STTService):
         channels: int = 1,
         block_size: int = 512,
         max_latency_ms: int = 200,
-        step_ms: int = 1000,
-        length_ms: int = 5000,
-        keep_ms: int = 500,
+        step_ms: int = 2500,  # Increased from 1000ms - process less frequently
+        length_ms: int = 3000,  # Reduced from 5000ms - smaller context window
+        keep_ms: int = 100,  # Reduced from 500ms - minimal context retention
         voice_threshold: float = 0.8,
-        threads: int = 6,
+        threads: int = 3,  # Reduced from 6 - better thermal management on MacBook
         event_emitter=None,
         **kwargs
     ):
@@ -287,6 +287,10 @@ class WhisperCppStreamingSTTService(STTService):
         self._timeout_checker_task = None
         self._timeout_check_interval = 1.0  # Check every second
         
+        # Adaptive processing for thermal management
+        self._consecutive_silence_count = 0
+        self._high_activity_mode = False
+        
         # Language change handling
         self._original_language = language  # Store original for comparison
         self._config_language = language  # Track config language separately
@@ -296,6 +300,7 @@ class WhisperCppStreamingSTTService(STTService):
         self._recent_tts_texts = []  # Store recent TTS outputs to prevent feedback
         self._tts_buffer_duration = 10.0  # Keep TTS texts for 10 seconds
         self._similarity_threshold = 0.85  # Threshold for detecting TTS echo
+        self._paused_for_tts = False  # Track if paused due to TTS playback
         
         # Process resource management
         self._idle_timeout = 30.0  # Stop process after 30s of no activity
@@ -374,7 +379,15 @@ class WhisperCppStreamingSTTService(STTService):
             return
             
         # Search for model in common locations
-        model_file = f"ggml-{self._model_size}.bin"
+        # For streaming, prefer smaller models for better thermal performance
+        if self._model_size == "base" or self._model_size == "small":
+            model_file = f"ggml-{self._model_size}.bin"
+        else:
+            # Force smaller model for streaming to prevent overheating
+            logger.warning(f"⚠️  Model size '{self._model_size}' too large for streaming, using 'base' instead")
+            self._model_size = "base"
+            model_file = "ggml-base.bin"
+            
         search_dirs = [
             "./mlx_models",
             "./models", 
@@ -658,12 +671,24 @@ class WhisperCppStreamingSTTService(STTService):
                     if current_time - ts <= self._tts_buffer_duration
                 ]
                 logger.debug(f"🔊 Tracking TTS text for feedback prevention: '{text}'")
+                
+                # AUDIO FEEDBACK PREVENTION: Pause whisper-stream during TTS playback
+                if self._whisper_process and self._whisper_process.poll() is None:
+                    logger.info("🔇 TTS started - pausing whisper-stream to prevent feedback")
+                    self._pause_for_tts()
+                    
         except Exception as e:
             logger.error(f"❌ Error handling TTS start event: {e}")
     
     async def _handle_tts_complete(self, event_data: dict):
         """Handle TTS completion events"""
         logger.debug("🔊 TTS playback completed")
+        
+        # AUDIO FEEDBACK PREVENTION: Resume whisper-stream after TTS completes
+        if not self._is_running and hasattr(self, '_paused_for_tts') and self._paused_for_tts:
+            logger.info("🎤 TTS completed - resuming whisper-stream")
+            await asyncio.sleep(0.5)  # Brief delay to ensure audio settles
+            self._resume_after_tts()
     
     def _is_tts_feedback(self, transcribed_text: str) -> bool:
         """Check if transcribed text is likely TTS feedback/echo"""
@@ -738,6 +763,29 @@ class WhisperCppStreamingSTTService(STTService):
             return time_since_stopped <= self._vad_grace_period
         
         return False
+    
+    def _pause_for_tts(self):
+        """Pause whisper-stream process during TTS playback to prevent feedback"""
+        if self._whisper_process and self._whisper_process.poll() is None:
+            try:
+                logger.info("⏸️  Sending SIGTERM to pause whisper-stream (prevents feedback)")
+                self._whisper_process.terminate()
+                self._paused_for_tts = True
+                self._is_running = False
+                logger.info("✅ Whisper-stream paused for TTS playback")
+            except Exception as e:
+                logger.error(f"❌ Error pausing whisper-stream: {e}")
+    
+    def _resume_after_tts(self):
+        """Resume whisper-stream process after TTS completes"""
+        try:
+            if self._paused_for_tts and not self._is_running:
+                logger.info("🎤 Restarting whisper-stream after TTS completion")
+                self._start_streaming_process()
+                self._paused_for_tts = False
+                logger.info("✅ Whisper-stream resumed and ready for speech")
+        except Exception as e:
+            logger.error(f"❌ Error resuming whisper-stream: {e}")
             
     async def _restart_with_new_language(self):
         """Restart the whisper-stream process with updated language settings"""
