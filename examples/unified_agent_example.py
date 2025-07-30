@@ -302,7 +302,7 @@ async def main():
     
     print("\n" + "="*60)
     print("🎉 All examples completed!")
-    print("💡 Try the unified launcher: python maestrocat_unified.py")
+    print("💡 Try the unified launcher: python maestrocat.py")
     print("📚 See PLATFORM_ABSTRACTION.md for full documentation")
     print("="*60)
 

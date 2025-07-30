@@ -136,19 +136,19 @@ print(f"Native services: {platform_info.capabilities.native_services}")
 
 ```bash
 # Auto-detect and run
-python maestrocat_unified.py
+python maestrocat.py
 
 # Check platform compatibility
-python maestrocat_unified.py --check
+python maestrocat.py --check
 
 # Show platform status
-python maestrocat_unified.py --status
+python maestrocat.py --status
 
 # Use custom config
-python maestrocat_unified.py --config config/custom.yaml
+python maestrocat.py --config config/custom.yaml
 
 # Force platform
-python maestrocat_unified.py --platform macos_native
+python maestrocat.py --platform macos_native
 ```
 
 ### Legacy Compatibility
@@ -261,7 +261,7 @@ def detect_windows_capabilities():
 
 ### Platform Status
 ```bash
-python maestrocat_unified.py --status
+python maestrocat.py --status
 ```
 
 ### Health Monitoring
@@ -309,19 +309,19 @@ The platform abstraction system maintains 100% backward compatibility:
 ### Platform Detection Issues
 ```bash
 # Check what platform is detected
-python maestrocat_unified.py --status
+python maestrocat.py --status
 
 # Force specific platform if detection fails
-python maestrocat_unified.py --platform docker
+python maestrocat.py --platform docker
 ```
 
 ### Service Startup Problems
 ```bash
 # Check dependencies
-python maestrocat_unified.py --check
+python maestrocat.py --check
 
 # Set up services only
-python maestrocat_unified.py --setup
+python maestrocat.py --setup
 ```
 
 ### Configuration Issues

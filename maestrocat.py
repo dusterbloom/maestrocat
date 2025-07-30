@@ -1,475 +1,402 @@
 #!/usr/bin/env python3
 """
-MaestroCat Universal Launcher (Legacy Compatibility Shim)
+MaestroCat Universal Launcher (New Platform Abstraction System)
 
-This is a compatibility shim that redirects to the new unified platform system.
-The original launcher logic has been moved to maestrocat_unified.py with the
-new platform abstraction system.
+This is the new unified launcher that uses the platform abstraction system
+to eliminate code duplication and provide a consistent experience across
+all supported platforms.
 
-For new deployments, please use maestrocat_unified.py directly.
+Features:
+- Automatic platform detection and optimization
+- Unified configuration with platform-specific sections
+- Intelligent service selection and fallbacks
+- Comprehensive health checking and setup validation
+- Clean command-line interface
+- Backward compatibility with existing configurations
+- Robust signal handling for graceful shutdown
 """
 
-import warnings
+import asyncio
+import argparse
+import logging
+import signal
 import sys
-import os
 from pathlib import Path
+from typing import Optional
 
-# Issue deprecation warning
-warnings.warn(
-    "The legacy maestrocat.py launcher is deprecated. "
-    "Please use maestrocat_unified.py which provides the new unified platform system. "
-    "This compatibility shim will be removed in a future version.",
-    DeprecationWarning,
-    stacklevel=2
-)
-
-# Add project root to path
+# Add the project root to Python path
 sys.path.append(str(Path(__file__).parent))
 
-# Import and install backward compatibility layer
-try:
-    from core.platform.migration import install_backward_compatibility
-    install_backward_compatibility()
-except ImportError:
-    pass
+from core.platform import (
+    MaestroCatAgent,
+    PlatformDetector,
+    ServiceFactory,
+    PlatformType
+)
+from core.platform.config import UnifiedMaestroCatConfig
+from core.platform.signal_handler import get_signal_handler, setup_signal_handlers
 
-# Legacy imports and compatibility
-import asyncio
-import platform
-import subprocess
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
-def detect_platform():
-    """Detect the current platform and return the appropriate configuration"""
-    system = platform.system().lower()
+
+class MaestroCatLauncher:
+    """
+    Unified launcher for MaestroCat that handles platform detection,
+    service setup, and agent lifecycle management with robust signal handling.
+    """
     
-    if system == "darwin":  # macOS
-        return "macos"
-    elif system == "linux":
-        # Check if running in WSL
-        try:
-            with open("/proc/version", "r") as f:
-                version_info = f.read().lower()
-                if "microsoft" in version_info or "wsl" in version_info:
-                    return "wsl"
-        except FileNotFoundError:
-            pass
-        return "linux"
-    else:
-        return "unknown"
-
-def check_gpu_availability():
-    """Check if NVIDIA GPU is available for Docker"""
-    try:
-        result = subprocess.run(["nvidia-smi"], capture_output=True, check=True)
-        return True
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return False
-
-def pull_docker_images(platform_type):
-    """Pull the appropriate Docker images based on platform"""
-    images_to_pull = []
-    
-    if platform_type == "macos":
-        # Skip WhisperLive on macOS since it doesn't support ARM64
-        # macOS users should use native Whisper.cpp instead
-        images_to_pull = [
-            ("ghcr.io/remsky/kokoro-fastapi-cpu:latest", "Kokoro TTS CPU"),
-            ("ollama/ollama:latest", "Ollama LLM")
-        ]
-        print("📥 Pulling ARM64-compatible images for macOS...")
-        print("⚠️  Note: WhisperLive skipped (no ARM64 support). Use native Whisper.cpp instead.")
-    else:
-        # Linux/WSL - check for GPU
-        if check_gpu_availability():
-            images_to_pull = [
-                ("ghcr.io/collabora/whisperlive-gpu:latest", "WhisperLive GPU"),
-                ("ghcr.io/remsky/kokoro-fastapi-gpu:latest", "Kokoro TTS GPU"),
-                ("ollama/ollama:latest", "Ollama LLM")
-            ]
-            print("📥 Pulling GPU-accelerated images...")
-        else:
-            images_to_pull = [
-                ("ghcr.io/collabora/whisperlive-cpu:latest", "WhisperLive CPU"),
-                ("ghcr.io/remsky/kokoro-fastapi-cpu:latest", "Kokoro TTS CPU"),
-                ("ollama/ollama:latest", "Ollama LLM")
-            ]
-            print("📥 Pulling CPU-only images...")
-    
-    for image, name in images_to_pull:
-        try:
-            # Check if image already exists
-            result = subprocess.run(
-                ["docker", "images", "-q", image], 
-                capture_output=True, text=True
-            )
-            if result.stdout.strip():
-                print(f"✅ {name} image already available")
-                continue
+    def __init__(self):
+        self.agent = None
+        self.platform_info = None
+        self.signal_handler = get_signal_handler()
+        
+    async def check_platform_compatibility(self, 
+                                         platform_type: Optional[PlatformType] = None) -> bool:
+        """
+        Check if the current platform is compatible with MaestroCat.
+        
+        Args:
+            platform_type: Force specific platform type for checking
             
-            # Pull the image
-            print(f"⬇️  Downloading {name}: {image}")
-            result = subprocess.run(
-                ["docker", "pull", image], 
-                capture_output=True, text=True
-            )
-            if result.returncode == 0:
-                print(f"✅ {name} downloaded successfully")
+        Returns:
+            True if platform is compatible, False otherwise
+        """
+        logger.info("🔍 Analyzing platform compatibility...")
+        
+        # Get platform information
+        self.platform_info = PlatformDetector.detect_full_platform_info()
+        
+        # Override platform type if specified
+        if platform_type:
+            logger.info(f"🎯 Using forced platform type: {platform_type.value}")
+            detected_platform = platform_type
+        else:
+            detected_platform = PlatformDetector.auto_select_strategy_type(self.platform_info)
+        
+        # Print platform information
+        print(f"\n🖥️  Platform Detection Results:")
+        print(f"   System: {self.platform_info.description}")
+        print(f"   Selected Strategy: {detected_platform.value}")
+        print(f"   Capabilities:")
+        print(f"     • GPU Available: {self.platform_info.capabilities.has_gpu}")
+        print(f"     • Metal Support: {self.platform_info.capabilities.supports_metal}")
+        print(f"     • MLX Support: {self.platform_info.capabilities.supports_mlx}")
+        print(f"     • Docker Available: {self.platform_info.capabilities.docker_available}")
+        print(f"     • Native Services: {', '.join(self.platform_info.capabilities.native_services) or 'None'}")
+        
+        # Get recommendations
+        recommendations = ServiceFactory.get_strategy_recommendations({})
+        print(f"\n💡 Platform Recommendations:")
+        print(f"   Recommended Strategy: {recommendations['recommended_strategy']}")
+        for reason in recommendations['reasoning']:
+            print(f"   • {reason}")
+        
+        if recommendations['performance_notes']:
+            print(f"   Performance Notes:")
+            for note in recommendations['performance_notes']:
+                print(f"   • {note}")
+        
+        # Check for potential issues
+        issues = []
+        
+        if detected_platform == PlatformType.DOCKER:
+            if not self.platform_info.capabilities.docker_available:
+                issues.append("Docker strategy selected but Docker is not available")
+        
+        elif detected_platform == PlatformType.MACOS_NATIVE:
+            if "ollama" not in self.platform_info.capabilities.native_services:
+                issues.append("macOS native strategy selected but Ollama is not available")
+        
+        if issues:
+            print(f"\n⚠️  Compatibility Issues:")
+            for issue in issues:
+                print(f"   • {issue}")
+            return False
+        
+        print(f"\n✅ Platform is compatible with MaestroCat!")
+        return True
+    
+    async def setup_services(self, config: UnifiedMaestroCatConfig) -> bool:
+        """
+        Set up platform services based on configuration.
+        
+        Args:
+            config: Unified configuration
+            
+        Returns:
+            True if setup successful, False otherwise
+        """
+        logger.info("🔧 Setting up platform services...")
+        
+        # Create strategy
+        strategy = ServiceFactory.auto_create_strategy(config)
+        
+        # Check dependencies
+        logger.info("📋 Checking platform dependencies...")
+        deps_ok, missing_deps = await strategy.check_dependencies()
+        
+        if not deps_ok:
+            print(f"\n❌ Missing Dependencies:")
+            for dep in missing_deps:
+                print(f"   • {dep}")
+            
+            # Show setup instructions
+            platform_type = strategy.platform_info.platform_type
+            print(f"\n🔧 Setup Instructions for {platform_type.value}:")
+            
+            if platform_type == PlatformType.MACOS_NATIVE:
+                print("   # Install native dependencies")
+                print("   brew install ollama ffmpeg")
+                print("   pip install 'pipecat-ai[mlx-whisper]'")
+                print("")
+                print("   # Start services")
+                print("   ollama serve &")
+                print("   ollama pull llama3.2:3b")
+            
+            elif platform_type == PlatformType.DOCKER:
+                print("   # Install Docker")
+                print("   # Visit: https://docker.com")
+                print("")
+                print("   # Start Docker daemon")
+                print("   sudo systemctl start docker  # Linux")
+                print("   # or start Docker Desktop")
+            
+            return False
+        
+        print(f"✅ All dependencies are available")
+        
+        # Set up services
+        logger.info("🚀 Starting platform services...")
+        services_ok = await strategy.setup_services()
+        
+        if not services_ok:
+            print(f"❌ Failed to start platform services")
+            return False
+        
+        print(f"✅ Platform services are ready")
+        
+        # Clean up strategy
+        await strategy.cleanup()
+        
+        return True
+    
+    async def run_agent(self,
+                       config_file: Optional[str] = None,
+                       platform_type: Optional[PlatformType] = None,
+                       host: str = "0.0.0.0",
+                       port: int = 8765) -> int:
+        """
+        Run the MaestroCat agent with robust signal handling.
+        
+        Args:
+            config_file: Path to configuration file
+            platform_type: Force specific platform type
+            host: Host to bind to
+            port: Port to bind to
+            
+        Returns:
+            Exit code (0 for success, 1 for error)
+        """
+        try:
+            # Load configuration
+            if config_file:
+                config = UnifiedMaestroCatConfig.from_file(config_file, platform_type)
             else:
-                print(f"❌ Failed to pull {name}: {result.stderr}")
-                return False
+                config = UnifiedMaestroCatConfig.auto_load(platform_type=platform_type)
+            
+            logger.info(f"📄 Loaded configuration: {config}")
+            
+            # Create agent
+            self.agent = MaestroCatAgent(config=config, platform_override=platform_type)
+            
+            # Register agent with signal handler
+            self.signal_handler.register_agent(self.agent)
+            
+            logger.info("🎭 Starting MaestroCat Universal Agent...")
+            
+            # Run agent with signal handling
+            await self.agent.run(host=host, websocket_port=port)
+            
+            return 0
+            
+        except KeyboardInterrupt:
+            logger.info("👋 Shutting down MaestroCat...")
+            return 0
         except Exception as e:
-            print(f"❌ Error pulling {name}: {e}")
-            return False
+            logger.error(f"❌ Error running MaestroCat: {e}")
+            return 1
+        finally:
+            if self.agent and not self.signal_handler.is_shutting_down():
+                logger.info("🧹 Cleaning up MaestroCat Agent...")
+                await self.agent.cleanup()
+                logger.info("✅ Cleanup complete")
     
-    return True
+    def print_platform_status(self):
+        """Print detailed platform status information"""
+        if not self.platform_info:
+            self.platform_info = PlatformDetector.detect_full_platform_info()
+        
+        print(f"\n🎭 MaestroCat Platform Status")
+        print(f"=" * 50)
+        print(f"Platform: {self.platform_info.description}")
+        print(f"Type: {self.platform_info.platform_type.value}")
+        print(f"")
+        print(f"Capabilities:")
+        print(f"  GPU Available: {self.platform_info.capabilities.has_gpu}")
+        print(f"  Metal Support: {self.platform_info.capabilities.supports_metal}")
+        print(f"  MLX Support: {self.platform_info.capabilities.supports_mlx}")
+        print(f"  Docker Available: {self.platform_info.capabilities.docker_available}")
+        print(f"  Native Services: {', '.join(self.platform_info.capabilities.native_services) or 'None'}")
+        print(f"")
+        print(f"Recommended Models:")
+        for service, model in self.platform_info.recommended_models.items():
+            print(f"  {service.upper()}: {model}")
+        print(f"=" * 50)
 
-def start_docker_services(platform_type):
-    """Start all Docker services based on platform"""
-    # First, ensure we have all required images
-    if not pull_docker_images(platform_type):
-        print("❌ Could not download required images")
-        return False
-    
-    if platform_type == "macos":
-        print("🍎 Starting macOS-specific Docker services...")
-        print("📦 Services: Ollama + Kokoro (CPU-optimized, WhisperLive excluded)")
-        cmd = ["docker-compose", "-f", "docker-compose.macos.yml", "up", "-d"]
-    else:
-        # Linux/WSL - check for GPU
-        if check_gpu_availability():
-            print("🚀 Starting GPU-accelerated Docker services for Linux/WSL...")
-            print("📦 Services: WhisperLive + Ollama + Kokoro (all GPU-accelerated)")
-            cmd = ["docker-compose", "-f", "docker-compose.yml", "-f", "docker-compose.gpu.yml", "up", "-d"]
-        else:
-            print("💻 Starting CPU-only Docker services for Linux/WSL...")
-            print("📦 Services: WhisperLive + Ollama + Kokoro (all CPU-only)")
-            cmd = ["docker-compose", "-f", "docker-compose.yml", "-f", "docker-compose.cpu.yml", "up", "-d"]
-    
-    try:
-        print(f"🔄 Running: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode == 0:
-            print("✅ Docker services started successfully")
-            if platform_type != "macos":
-                print("🔊 WhisperLive STT: ws://localhost:9090")
-            print("🧠 Ollama LLM: http://localhost:11434")
-            if platform_type == "macos":
-                print("🗣️  Kokoro TTS: http://localhost:5001")
-                print("🌐 Kokoro Web UI: http://localhost:5001/web")
-            else:
-                print("🗣️  Kokoro TTS: http://localhost:5000")
-                print("🌐 Kokoro Web UI: http://localhost:5000/web")
-            return True
-        else:
-            print(f"❌ Failed to start Docker services (exit code {result.returncode})")
-            if result.stderr:
-                print(f"STDERR: {result.stderr}")
-            if result.stdout:
-                print(f"STDOUT: {result.stdout}")
-            return False
-    except Exception as e:
-        print(f"❌ Error starting Docker services: {e}")
-        return False
 
-def check_dependencies(platform_type):
-    """Check if required dependencies are available for the platform"""
-    missing = []
-    
-    if platform_type == "macos":
-        # macOS uses native services, check for native dependencies
-        try:
-            result = subprocess.run(["ollama", "--version"], capture_output=True, check=True)
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            missing.append("Ollama (install with: brew install ollama)")
-        
-        try:
-            result = subprocess.run(["whisper-cpp", "--help"], capture_output=True, check=True)
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            missing.append("Whisper.cpp (install with: brew install whisper-cpp)")
-        
-        try:
-            result = subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            missing.append("FFmpeg (install with: brew install ffmpeg)")
-    else:
-        # Linux/WSL/Windows use Docker services
-        try:
-            result = subprocess.run(["docker", "--version"], capture_output=True, check=True)
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            missing.append("Docker (install from: https://docker.com)")
-        
-        try:
-            result = subprocess.run(["docker-compose", "--version"], capture_output=True, check=True)
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            missing.append("Docker Compose (install with: pip install docker-compose)")
-        
-        # Check if Docker daemon is running
-        try:
-            result = subprocess.run(["docker", "ps"], capture_output=True, check=True)
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            missing.append("Docker daemon not running (start Docker Desktop or run: sudo systemctl start docker)")
-    
-    return missing
-
-def get_config_and_example(platform_type):
-    """Get the appropriate config file and example script for the platform"""
-    if platform_type == "macos":
-        return "config/maestrocat_macos.yaml", "examples/local_maestrocat_macos.py"
-    else:
-        return "config/maestrocat.yaml", "examples/local_maestrocat_agent.py"
-
-def print_platform_info(platform_type, config_file, example_file):
-    """Print platform-specific information"""
-    print("🎭 MaestroCat Universal Launcher")
-    print("=" * 50)
-    
-    if platform_type == "macos":
-        print("🍎 Detected: macOS (Apple Silicon optimized)")
-        print("🚀 Using: Native services (Whisper.cpp + Ollama + Kokoro-onnx )")
-        print("⚡ Performance: Metal acceleration enabled")
-    elif platform_type == "wsl":
-        print("🐧 Detected: Windows Subsystem for Linux")
-        print("🐳 Using: Docker services (WhisperLive + Ollama + Kokoro)")
-        print("🔊 Audio: WSL audio transport")
-    elif platform_type == "linux":
-        print("🐧 Detected: Linux")
-        print("🐳 Using: Docker services (WhisperLive + Ollama + Kokoro)")
-        print("🎵 Audio: PyAudio transport")
-    elif platform_type == "windows":
-        print("🪟 Detected: Windows")
-        print("🐳 Using: Docker services (WhisperLive + Ollama + Kokoro)")
-        print("🎵 Audio: Windows audio transport")
-    else:
-        print(f"❓ Detected: {platform_type} (unknown)")
-        print("🐳 Using: Docker services (fallback)")
-    
-    print("")
-    print(f"📄 Config: {config_file}")
-    print(f"🎯 Script: {example_file}")
-    print("=" * 50)
-
-def print_setup_instructions(platform_type, missing_deps):
-    """Print setup instructions for missing dependencies"""
-    if not missing_deps:
-        return
-        
-    print("❌ Missing Dependencies:")
-    for dep in missing_deps:
-        print(f"   • {dep}")
-    print("")
-    
-    if platform_type == "macos":
-        print("🔧 macOS Setup Commands:")
-        print("   brew install ollama whisper-cpp ffmpeg")
-        print("   ollama serve &")
-        print("   ollama pull llama3.2:3b")
-        print("")
-    else:
-        print("🔧 Docker Setup Commands:")
-        print("   docker-compose up -d")
-        print("   docker-compose ps  # Check services")
-        print("")
-
-async def main():
-    """Main launcher function"""
-    # Detect platform
-    platform_type = detect_platform()
-    
-    # Get appropriate configuration
-    config_file, example_file = get_config_and_example(platform_type)
-    
-    # Print platform info
-    print_platform_info(platform_type, config_file, example_file)
-    
-    # Check dependencies
-    missing_deps = check_dependencies(platform_type)
-    
-    if missing_deps:
-        print_setup_instructions(platform_type, missing_deps)
-        print("❗ Please install missing dependencies and try again.")
-        return 1
-    
-    # Check if config and example files exist
-    if not os.path.exists(config_file):
-        print(f"❌ Config file not found: {config_file}")
-        return 1
-        
-    if not os.path.exists(example_file):
-        print(f"❌ Example file not found: {example_file}")
-        return 1
-    
-    print("✅ All dependencies available!")
-    print("")
-    
-    # Start Docker services only for non-macos platforms
-    if platform_type != "macos":
-        print("🔧 Starting Docker services...")
-        if not start_docker_services(platform_type):
-            print("❗ Warning: Could not start Docker services. Please check Docker installation.")
-    
-    print("")
-    print("🚀 Starting MaestroCat...")
-    print(f"💻 Platform: {platform_type}")
-    
-    # Platform-specific service information
-    if platform_type == "macos":
-        print("🎤 STT: Native Whisper.cpp (Apple Silicon optimized)")
-        print("🧠 LLM: Native Ollama (Apple Silicon optimized)")
-        print("🗣️  TTS: Native macOS TTS")
-    elif check_gpu_availability():
-        print("🎤 STT: WhisperLive (Docker, GPU-accelerated)")
-        print("🧠 LLM: Ollama (Docker, GPU-accelerated)")
-        print("🗣️  TTS: Kokoro (Docker, GPU-accelerated)")
-    else:
-        print("🎤 STT: WhisperLive (Docker, CPU-only)")
-        print("🧠 LLM: Ollama (Docker, CPU-only)")
-        print("🗣️  TTS: Kokoro (Docker, CPU-only)")
-        
-    print("🌐 WebSocket: http://localhost:8765/ws")
-    print("🐛 Debug UI: http://localhost:8080")
-    
-    print("")
-    print("Press Ctrl+C to stop")
-    print("=" * 50)
-    
-    # Import and run the appropriate example
-    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-    
-    try:
-        if platform_type == "macos":
-            from examples.local_maestrocat_macos import MacOSMaestroCatAgent
-            agent = MacOSMaestroCatAgent(config_file)
-        else:
-            from examples.local_maestrocat_agent import LocalMaestroCatAgent
-            agent = LocalMaestroCatAgent(config_file)
-        
-        await agent.run()
-        
-    except KeyboardInterrupt:
-        print("\n👋 MaestroCat shutting down...")
-        return 0
-    except Exception as e:
-        print(f"\n❌ Error: {e}")
-        return 1
-
-def cli():
-    """Command line interface"""
-    import argparse
-    
+def main():
+    """Main entry point with robust signal handling"""
     parser = argparse.ArgumentParser(
-        description="MaestroCat Universal Launcher",
+        description="MaestroCat Universal Launcher - Platform-agnostic voice AI agent",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    maestrocat                    # Auto-detect platform and start
-    python maestrocat.py          # Same as above
-    python -m maestrocat          # Module execution
-    
-Platform Detection:
-    • macOS: Uses native Whisper.cpp + Ollama + macOS TTS
-    • Linux: Uses Docker services (WhisperLive + Ollama + Kokoro)
-    • WSL: Uses Docker services with WSL audio transport
-    • Windows: Uses Docker services with Windows audio transport
+    %(prog)s                                    # Auto-detect platform and run
+    %(prog)s --config config/custom.yaml       # Use custom configuration
+    %(prog)s --platform macos_native           # Force macOS native platform
+    %(prog)s --check                           # Check platform compatibility only
+    %(prog)s --status                          # Show platform status
+    %(prog)s --setup                           # Set up services only
+
+Platform Types:
+    docker          Docker-based services (Linux, Windows, WSL)
+    macos_native    macOS native services (Whisper.cpp + Ollama + macOS TTS)
+    wsl             Windows Subsystem for Linux (extends Docker)
+    windows         Windows (extends Docker)
+
+Configuration:
+    • Unified config:  config/maestrocat_unified.yaml
+    • Legacy configs:  config/maestrocat.yaml, config/maestrocat_macos.yaml
+    • Auto-detection: Automatically selects best config for platform
         """
     )
     
+    # Configuration options
     parser.add_argument(
-        "--platform", 
-        choices=["macos", "linux", "wsl", "windows"],
-        help="Force specific platform instead of auto-detection"
+        "--config", "-c",
+        type=str,
+        help="Path to configuration file (auto-detects if not specified)"
     )
     
     parser.add_argument(
-        "--config",
-        help="Path to custom config file"
+        "--platform", "-p",
+        choices=["docker", "macos_native", "wsl", "windows"],
+        help="Force specific platform type (overrides auto-detection)"
+    )
+    
+    # Service options
+    parser.add_argument(
+        "--host",
+        default="0.0.0.0",
+        help="Host to bind WebSocket server to (default: 0.0.0.0)"
     )
     
     parser.add_argument(
-        "--check-only",
+        "--port",
+        type=int,
+        default=8765,
+        help="Port for WebSocket server (default: 8765)"
+    )
+    
+    # Utility commands
+    parser.add_argument(
+        "--check",
         action="store_true",
-        help="Only check dependencies, don't start the agent"
+        help="Check platform compatibility and exit"
     )
     
     parser.add_argument(
-        "--start-docker",
+        "--status",
+        action="store_true", 
+        help="Show platform status and exit"
+    )
+    
+    parser.add_argument(
+        "--setup",
         action="store_true",
-        help="Only start Docker services, don't run the agent"
+        help="Set up platform services only (don't run agent)"
+    )
+    
+    # Debug options
+    parser.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        help="Enable verbose logging"
     )
     
     args = parser.parse_args()
     
-    # Override platform detection if specified
+    # Configure logging level
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+    
+    # Parse platform type
+    platform_type = None
     if args.platform:
-        platform_type = args.platform
-    else:
-        platform_type = detect_platform()
+        platform_type = PlatformType(args.platform)
     
-    # Override config if specified
-    if args.config:
-        config_file = args.config
-        example_file = get_config_and_example(platform_type)[1]
-    else:
-        config_file, example_file = get_config_and_example(platform_type)
+    # Create launcher
+    launcher = MaestroCatLauncher()
     
-    print_platform_info(platform_type, config_file, example_file)
-    
-    # Check dependencies
-    missing_deps = check_dependencies(platform_type)
-    
-    if missing_deps:
-        print_setup_instructions(platform_type, missing_deps)
-        return 1
-    
-    if args.check_only:
-        print("✅ All dependencies available!")
-        return 0
+    async def run():
+        # Handle utility commands
+        if args.status:
+            launcher.print_platform_status()
+            return 0
         
-    if args.start_docker:
-        if platform_type == "macos":
-            print("❌ Docker services are not used on macOS - native services are used instead")
-            return 1
+        if args.check:
+            compatible = await launcher.check_platform_compatibility(platform_type)
+            return 0 if compatible else 1
         
-        print("🔧 Starting Docker services with Debug UI...")
-        if start_docker_services(platform_type):
-            print("✅ Docker services started successfully!")
-            print("🔍 Check status with: docker-compose ps")
-            print("")
+        if args.setup:
+            # Load config for setup
+            if args.config:
+                config = UnifiedMaestroCatConfig.from_file(args.config, platform_type)
+            else:
+                config = UnifiedMaestroCatConfig.auto_load(platform_type=platform_type)
             
-            # Start debug UI server
-            from core.apps.debug_ui import DebugUIServer
-            debug_port = 8080
-            print(f"🐛 Starting Debug UI on http://localhost:{debug_port}")
-            print("💡 Debug UI will show live data when MaestroCat agent connects")
-            print("🔄 Leave this running and start the agent in another terminal")
-            print("")
-            print("Press Ctrl+C to stop")
-            
-            try:
-                server = DebugUIServer(port=debug_port)
-                return asyncio.run(server.start())
-            except KeyboardInterrupt:
-                print("\n👋 Debug UI shutting down...")
-                return 0
-        else:
-            print("❌ Failed to start Docker services")
-            return 1
+            success = await launcher.setup_services(config)
+            return 0 if success else 1
+        
+        # Run the agent
+        return await launcher.run_agent(
+            config_file=args.config,
+            platform_type=platform_type,
+            host=args.host,
+            port=args.port
+        )
     
-    # Run the agent
-    return asyncio.run(main())
+    # Run the launcher with signal handling
+    try:
+        # Set up signal handlers
+        setup_signal_handlers()
+        
+        # Run the main async function
+        exit_code = asyncio.run(run())
+        sys.exit(exit_code)
+        
+    except KeyboardInterrupt:
+        print("\n👋 Goodbye!")
+        sys.exit(0)
+    except Exception as e:
+        logger.error(f"❌ Fatal error: {e}")
+        sys.exit(1)
+
 
 if __name__ == "__main__":
-    # Redirect to new unified launcher with compatibility warning
-    print("⚠️  Legacy launcher detected!")
-    print("📄 Redirecting to maestrocat_unified.py...")
-    print("💡 For best experience, use: python maestrocat_unified.py")
-    print("")
-    
-    try:
-        # Import and run new unified launcher
-        from maestrocat_unified import main as unified_main
-        unified_main()
-    except ImportError:
-        # Fallback to legacy implementation if unified launcher not available
-        print("❌ Unified launcher not found, using legacy implementation")
-        exit_code = cli()
-        sys.exit(exit_code)
+    main()

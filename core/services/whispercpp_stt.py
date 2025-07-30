@@ -219,18 +219,16 @@ class WhisperCppSTTService(STTService):
     def _process_audio_chunk(self, audio_data: bytes) -> Optional[str]:
         """Process audio chunk with whisper.cpp"""
         try:
-            # Create temporary WAV file
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
-                temp_path = temp_file.name
-                
-                # Convert raw audio to WAV format
-                self._write_wav(temp_file, audio_data)
-                
-            # Run whisper.cpp (updated for whisper-cli)
+
+            import io
+            wav_buffer = io.BytesIO()
+            self._write_wav(wav_buffer, audio_data)
+            wav_data = wav_buffer.getvalue()
+
             cmd = [
                 self._whisper_bin,
                 "-m", self._model_path,
-                "-f", temp_path,
+                "-f", "-",  # Read from stdin
                 "-t", "4",  # threads
                 "-p", "1",  # processors
                 "-nt",  # no timestamps
@@ -247,7 +245,7 @@ class WhisperCppSTTService(STTService):
                 
             logger.info(f"Running whisper.cpp command: {' '.join(cmd)}")
             start_time = time.time()
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, input=wav_data, capture_output=True, text=True)
             stt_latency = (time.time() - start_time) * 1000  # Convert to milliseconds
             
             # Clean up temp file
