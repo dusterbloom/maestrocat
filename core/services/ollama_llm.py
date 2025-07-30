@@ -141,6 +141,7 @@ class OLLamaLLMService(LLMService):
                     "num_batch": 512,  # Smaller batch for faster first token
                     "num_threads": -1,  # Use all cores
                     "num_gpu": -1,  # Use all GPU layers if available
+                    "stop": ["<|eot_id|>", "<|end_of_text|>", "\n\nUser:", "\n\nHuman:", "###", "<|im_end|>"]  # Stop tokens to prevent repetition
                 }
             }
             
@@ -166,6 +167,11 @@ class OLLamaLLMService(LLMService):
                         
                         if "error" in data:
                             logger.error(f"Ollama error: {data['error']}")
+                            break
+                        
+                        # Check if response is complete
+                        if data.get("done", False):
+                            logger.debug("Ollama response marked as done")
                             break
                             
                         # Extract token and stream immediately
