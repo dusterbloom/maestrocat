@@ -29,9 +29,9 @@ language_config:
 
 # Core VAD settings (used by all platforms)
 vad:
-  energy_threshold: 0.8
-  min_speech_ms: 500
-  pause_ms: 1500    # Allow longer pauses for natural speech
+  energy_threshold: 0.5  # Lower threshold for better microphone detection
+  min_speech_ms: 250     # Faster detection
+  pause_ms: 800          # Shorter pause for more responsive interaction
 
 # Base STT configuration
 stt:
@@ -112,7 +112,7 @@ platforms:
   # macOS native platform configuration  
   macos_native:
     stt:
-      service: "whispercpp_streaming"    # Streaming whisper.cpp for real-time transcription
+      service: "mlx_whisper"    # MLX Whisper for Apple Silicon optimization
       model_size: "medium"                # Small model for good accuracy
       sample_rate: 16000
       channels: 1                        # Mono audio

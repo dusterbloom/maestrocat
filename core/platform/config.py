@@ -150,6 +150,10 @@ class UnifiedMaestroCatConfig:
         self.development = UnifiedDevelopmentConfig(**config_dict.get("development", {}))
         self.platform_selection = PlatformSelectionConfig(**config_dict.get("platform", {}))
         
+        # Load language settings
+        self.language = config_dict.get("language", "en")
+        self.language_config = config_dict.get("language_config", {})
+        
         # Check for platform preference override
         if (self.platform_selection.preferred and 
             self.platform_selection.auto_detect and 
@@ -210,6 +214,12 @@ class UnifiedMaestroCatConfig:
         merged_stt = {**base_stt, **platform_stt}
         merged_llm = {**base_llm, **platform_llm}
         merged_tts = {**base_tts, **platform_tts}
+        
+        # Apply language settings from top-level config if not overridden
+        if 'language' not in merged_stt and hasattr(self, 'language'):
+            # Get STT language from language_config or use the global language
+            lang_settings = self.language_config.get(self.language, {})
+            merged_stt['language'] = lang_settings.get('stt_language', self.language)
         
         # Apply intelligent model selection based on platform capabilities
         self._apply_intelligent_model_selection(merged_llm, platform_config)

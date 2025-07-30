@@ -25,7 +25,8 @@ from ..processors import (
     InterruptionHandler,
     MetricsCollector,
     EventEmitter,
-    ModuleLoader
+    ModuleLoader,
+    TranscriptionEventProcessor
 )
 from ..processors.language_handler import LanguageHandler
 from ..processors.turn_metrics_tracker import TurnMetricsTracker
@@ -273,7 +274,7 @@ class MaestroCatAgent:
         context_aggregator = self.llm.create_context_aggregator(context)
         
         # Create language handler for dynamic language updates
-        language_handler = LanguageHandler(context, self.event_emitter, self.config)
+        language_handler = LanguageHandler(context, self.debug_ui.event_emitter, self.config)
         
         # Build the pipeline
         pipeline = Pipeline([

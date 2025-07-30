@@ -264,11 +264,13 @@ class MacOSPlatformStrategy(PlatformStrategy):
         
         model_size = getattr(stt_config, 'model_size', 'small')
         
-        # Get language from unified language config
-        current_language = getattr(self.config, 'language', 'en')
-        language_config = getattr(self.config, 'language_config', {})
-        lang_settings = language_config.get(current_language, language_config.get('en', {}))
-        language = lang_settings.get('stt_language', 'en')
+        # Get language from STT config first, then fall back to unified language config
+        language = getattr(stt_config, 'language', None)
+        if not language:
+            current_language = getattr(self.config, 'language', 'en')
+            language_config = getattr(self.config, 'language_config', {})
+            lang_settings = language_config.get(current_language, language_config.get('en', {}))
+            language = lang_settings.get('stt_language', current_language)
         
         # Lightning Whisper MLX for M4 optimization (5-10x faster)
         if service_type == 'lightning_whisper_mlx':
@@ -317,10 +319,26 @@ class MacOSPlatformStrategy(PlatformStrategy):
                 
                 model = model_mapping.get(model_size, MLXModel.MEDIUM)
                 
-                # Always use auto-detect (None) for multilingual support
-                # This allows Whisper to detect any language and transcribe it properly
-                lang_enum = "auto" if language == "auto" else Language.from_code(language)
-                logger.info("🌍 Using auto-detect mode for multilingual transcription")
+                # Map language code to Language enum
+                if language == "auto":
+                    lang_enum = None  # None means auto-detect
+                    logger.info("🌍 Using auto-detect mode for multilingual transcription")
+                else:
+                    # Map common language codes to Language constants
+                    lang_mapping = {
+                        "en": Language.EN,
+                        "it": Language.IT,
+                        "fr": Language.FR,
+                        "es": Language.ES,
+                        "de": Language.DE,
+                        "pt": Language.PT,
+                        "ja": Language.JA,
+                        "zh": Language.ZH,
+                        "ru": Language.RU,
+                        "ko": Language.KO
+                    }
+                    lang_enum = lang_mapping.get(language.lower(), Language.EN)  # Default to English
+                    logger.info(f"🌍 Using language: {language} -> {lang_enum}")
                 
                 return MLXWhisperPreloadSTTService(
                     model=model,

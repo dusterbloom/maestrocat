@@ -189,7 +189,8 @@ class MaestroCatLauncher:
                        config_file: Optional[str] = None,
                        platform_type: Optional[PlatformType] = None,
                        host: str = "0.0.0.0",
-                       port: int = 8765) -> int:
+                       port: int = 8765,
+                       language: Optional[str] = None) -> int:
         """
         Run the MaestroCat agent with robust signal handling.
         
@@ -198,6 +199,7 @@ class MaestroCatLauncher:
             platform_type: Force specific platform type
             host: Host to bind to
             port: Port to bind to
+            language: Override language setting
             
         Returns:
             Exit code (0 for success, 1 for error)
@@ -208,6 +210,14 @@ class MaestroCatLauncher:
                 config = UnifiedMaestroCatConfig.from_file(config_file, platform_type)
             else:
                 config = UnifiedMaestroCatConfig.auto_load(platform_type=platform_type)
+            
+            # Override language if specified on command line
+            if language:
+                logger.info(f"🌍 Overriding language from command line: {language}")
+                config.language = language
+                # Update STT language as well
+                if hasattr(config, 'stt'):
+                    config.stt.language = language
             
             logger.info(f"📄 Loaded configuration: {config}")
             
@@ -299,6 +309,13 @@ Configuration:
         help="Force specific platform type (overrides auto-detection)"
     )
     
+    parser.add_argument(
+        "--language", "-l",
+        type=str,
+        choices=["en", "it", "fr", "es", "pt", "ja", "zh", "de", "ru", "ko", "auto"],
+        help="Set transcription language (improves speed and accuracy). Use 'auto' for automatic detection."
+    )
+    
     # Service options
     parser.add_argument(
         "--host",
@@ -378,7 +395,8 @@ Configuration:
             config_file=args.config,
             platform_type=platform_type,
             host=args.host,
-            port=args.port
+            port=args.port,
+            language=args.language
         )
     
     # Run the launcher with signal handling

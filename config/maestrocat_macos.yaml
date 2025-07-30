@@ -9,7 +9,7 @@ vad:
 
 # STT Configuration
 stt:
-  service: "whispercpp_streaming"   # Options: "whispercpp", "whispercpp_streaming", "mlx_whisper"
+  service: "mlx_whisper"   # Options: "whispercpp", "whispercpp_streaming", "mlx_whisper"
   model_size: "medium"  # Using medium for faster STT processing (testing turn metrics)
   language: "it"          # Language code or "auto" for detection
   translate: false
