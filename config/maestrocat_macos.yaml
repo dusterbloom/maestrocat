@@ -10,7 +10,7 @@ vad:
 # STT Configuration
 stt:
   service: "mlx_whisper"   # Options: "whispercpp", "whispercpp_streaming", "mlx_whisper"
-  model_size: "medium"  # Using medium for faster STT processing (testing turn metrics)
+  model_size: "base"  # Best quality/speed ratio (~300ms) for sub-second responses
   language: "it"          # Language code or "auto" for detection
   translate: false
   sample_rate: 16000
@@ -114,7 +114,7 @@ development:
 production:
   # Smaller models for better performance
   stt:
-    model_size: "medium"     # Using medium for faster STT processing
+    model_size: "tiny"     # Ultra-fast (<100ms) for production real-time needs
     
   llm:
     model: "llama3.2:1b"   # Smaller, faster model
