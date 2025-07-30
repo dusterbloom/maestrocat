@@ -10,7 +10,7 @@ vad:
 # STT Configuration
 stt:
   service: "mlx_whisper"   # Options: "whispercpp", "whispercpp_streaming", "mlx_whisper"
-  model_size: "base"  # Best quality/speed ratio (~300ms) for sub-second responses
+  model_size: "large-v3-turbo"  # Best quality/speed ratio (~300ms) for sub-second responses
   language: "it"          # Language code or "auto" for detection
   translate: false
   sample_rate: 16000
