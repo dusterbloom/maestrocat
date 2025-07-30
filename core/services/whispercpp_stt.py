@@ -107,8 +107,11 @@ class WhisperCppSTTService(STTService):
         
     def _ensure_model(self):
         """Ensure the Whisper model is downloaded"""
-        if self._model_path and os.path.exists(self._model_path):
-            return
+        # Expand tilde in model path if provided
+        if self._model_path:
+            self._model_path = os.path.expanduser(self._model_path)
+            if os.path.exists(self._model_path):
+                return
             
         # Default model directory
         models_dir = os.path.expanduser("~/.cache/whisper")
@@ -219,22 +222,21 @@ class WhisperCppSTTService(STTService):
     def _process_audio_chunk(self, audio_data: bytes) -> Optional[str]:
         """Process audio chunk with whisper.cpp"""
         try:
-
-            import io
-            wav_buffer = io.BytesIO()
-            self._write_wav(wav_buffer, audio_data)
-            wav_data = wav_buffer.getvalue()
+            # Create temporary WAV file
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+                self._write_wav(temp_file, audio_data)
+                temp_path = temp_file.name
 
             cmd = [
                 self._whisper_bin,
                 "-m", self._model_path,
-                "-f", "-",  # Read from stdin
                 "-t", "4",  # threads
                 "-p", "1",  # processors
                 "-nt",  # no timestamps
                 "-np",  # no prints (only output transcription)
                 "-nth", "0.8",  # higher no-speech threshold to reduce hallucinations
-                "-nf"  # no fallback (faster)
+                "-nf",  # no fallback (faster)
+                temp_path  # input file as positional argument
             ]
             
             # Always use explicit language (no auto-detection)
@@ -245,7 +247,7 @@ class WhisperCppSTTService(STTService):
                 
             logger.info(f"Running whisper.cpp command: {' '.join(cmd)}")
             start_time = time.time()
-            result = subprocess.run(cmd, input=wav_data, capture_output=True, text=True)
+            result = subprocess.run(cmd, capture_output=True)
             stt_latency = (time.time() - start_time) * 1000  # Convert to milliseconds
             
             # Clean up temp file
@@ -256,14 +258,19 @@ class WhisperCppSTTService(STTService):
             
             # Store timing for metrics
             self._last_stt_latency = stt_latency
-            if result.stderr:
-                logger.warning(f"Whisper.cpp stderr: {result.stderr}")
-            if result.stdout:
-                logger.info(f"Whisper.cpp stdout: {result.stdout}")
+            
+            # Decode bytes output to string
+            stderr_text = result.stderr.decode('utf-8') if result.stderr else ""
+            stdout_text = result.stdout.decode('utf-8') if result.stdout else ""
+            
+            if stderr_text:
+                logger.warning(f"Whisper.cpp stderr: {stderr_text}")
+            if stdout_text:
+                logger.info(f"Whisper.cpp stdout: {stdout_text}")
             
             if result.returncode == 0:
                 # Extract transcription from output
-                transcription = result.stdout.strip()
+                transcription = stdout_text.strip()
                 
                 # Filter out empty or noise transcriptions
                 if transcription and len(transcription) > 1:
@@ -277,7 +284,7 @@ class WhisperCppSTTService(STTService):
                         return transcription
                         
             else:
-                logger.error(f"Whisper.cpp error: {result.stderr}")
+                logger.error(f"Whisper.cpp error: {stderr_text}")
                 
         except Exception as e:
             logger.error(f"Error processing audio chunk: {e}")
