@@ -19,6 +19,11 @@ class TranscriptionEventProcessor(FrameProcessor):
         super().__init__()
         self._event_emitter = event_emitter
         
+        # Deduplication tracking
+        self._last_emitted_text = ""
+        self._last_emission_time = 0.0
+        self._dedup_time_window = 2.0  # 2 seconds window for deduplication
+        
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames and emit events for transcription frames"""
         
@@ -33,11 +38,25 @@ class TranscriptionEventProcessor(FrameProcessor):
         # Check if this is a transcription frame
         if isinstance(frame, TranscriptionFrame):
             if self._event_emitter and frame.text:
+                current_time = time.time()
+                
+                # Check for duplicate emission (within time window)
+                if (frame.text == self._last_emitted_text and 
+                    current_time - self._last_emission_time < self._dedup_time_window):
+                    logger.debug(f"🔇 BLOCKING DUPLICATE TRANSCRIPTION EVENT: '{frame.text}'")
+                    # Still process the frame, just don't emit the event
+                    await self.push_frame(frame, direction)
+                    return
+                
+                # Track this emission for deduplication
+                self._last_emitted_text = frame.text
+                self._last_emission_time = current_time
+                
                 # Emit transcription event for debug UI
                 await self._event_emitter.emit("transcription_final", {
                     "text": frame.text,
                     "confidence": 1.0,  # MLX Whisper doesn't provide confidence
-                    "timestamp": time.time(),
+                    "timestamp": current_time,
                     "user_id": frame.user_id or "user"
                 })
                 logger.debug(f"Emitted transcription event: '{frame.text}'")

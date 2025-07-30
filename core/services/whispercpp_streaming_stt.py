@@ -250,6 +250,11 @@ class WhisperCppStreamingSTTService(STTService):
         self._last_partial_time = 0
         self._is_running = False
         
+        # Deduplication tracking
+        self._last_emitted_text = ""
+        self._last_emission_time = 0.0
+        self._dedup_time_window = 2.0  # 2 seconds window for deduplication
+        
         # Utterance boundary detection
         self._boundary_detector = UtteranceBoundaryDetector(
             silence_threshold_ms=800.0,   # 800ms gap indicates utterance boundary (reduced from 1200ms)
@@ -939,8 +944,12 @@ class WhisperCppStreamingSTTService(STTService):
             logger.debug(f"Failed to parse segment, line format: {line!r}")
             # If it's not a timestamped segment, treat as direct transcription
             if not any(skip in line for skip in ['[BLANK_AUDIO]', '[ Silence ]', '[Start speaking]']):
-                logger.info(f"Direct transcription (no timestamp): '{line}'")
-                self._emit_complete_utterance(line)
+                # Check for duplicate transcription to prevent duplicates
+                if line != self._current_transcription:
+                    logger.info(f"Direct transcription (no timestamp): '{line}'")
+                    self._emit_complete_utterance(line)
+                else:
+                    logger.debug(f"Skipping duplicate transcription: '{line}'")
             return
             
         # Use boundary detector to determine if utterance is complete
@@ -1052,6 +1061,16 @@ class WhisperCppStreamingSTTService(STTService):
         if self._is_tts_feedback(utterance_text):
             logger.warning(f"🔇 BLOCKING TTS FEEDBACK: '{utterance_text}'")
             return
+        
+        # Check for duplicate emission (within time window)
+        if (utterance_text == self._last_emitted_text and 
+            current_time - self._last_emission_time < self._dedup_time_window):
+            logger.debug(f"🔇 BLOCKING DUPLICATE EMISSION: '{utterance_text}'")
+            return
+        
+        # Track this emission for deduplication
+        self._last_emitted_text = utterance_text
+        self._last_emission_time = current_time
         
         logger.info(f"🚀 EMITTING UTTERANCE TO LLM: '{utterance_text}'")
         self._last_activity_time = current_time
