@@ -10,7 +10,7 @@ from typing import AsyncGenerator, Optional, Dict, Any, List
 from dataclasses import dataclass
 from enum import Enum
 
-from pipecat.frames.frames import Frame, TranscriptionFrame
+from pipecat.frames.frames import Frame, TranscriptionFrame, UserStartedSpeakingFrame, UserStoppedSpeakingFrame
 from pipecat.services.stt_service import STTService
 
 logger = logging.getLogger(__name__)
@@ -252,16 +252,19 @@ class WhisperCppStreamingSTTService(STTService):
         
         # Utterance boundary detection
         self._boundary_detector = UtteranceBoundaryDetector(
-            silence_threshold_ms=1200.0,  # 600ms gap indicates utterance boundary
-            completion_timeout_ms=2500.0,  # 2.5s timeout for incomplete utterances
-            min_utterance_length=3  # Minimum 3 characters for valid utterance
+            silence_threshold_ms=800.0,   # 800ms gap indicates utterance boundary (reduced from 1200ms)
+            completion_timeout_ms=1500.0, # 1.5s timeout for incomplete utterances (reduced from 2.5s)
+            min_utterance_length=3        # Minimum 3 characters for valid utterance
         )
         
-        # Legacy sliding window overlap handling (fallback for edge cases)
-        # NOTE: With fixed step mode (--step 1000), this should no longer be needed
-        self._transcription_buffer = []  # Store recent transcriptions for overlap detection
-        self._buffer_max_size = 5  # Keep last 5 transcriptions for overlap analysis
-        self._overlap_threshold = 0.7  # Similarity threshold for overlap detection
+        # VAD-aware transcription control
+        self._user_is_speaking = False
+        self._user_stopped_time = 0.0
+        self._vad_grace_period = 1.0  # Accept transcriptions for 1s after user stops speaking
+        self._speech_session_active = False
+        
+        # Legacy sliding window overlap handling has been removed as the UtteranceBoundaryDetector
+        # with timestamp analysis provides more accurate utterance boundary detection.
         
         # Process management
         self._whisper_process = None
@@ -543,46 +546,6 @@ class WhisperCppStreamingSTTService(STTService):
             logger.error(f"Failed to start whisper.cpp stream: {e}")
             raise
             
-    def _calculate_text_similarity(self, text1: str, text2: str) -> float:
-        """Calculate similarity between two text strings using word overlap"""
-        words1 = set(text1.lower().split())
-        words2 = set(text2.lower().split())
-        
-        if not words1 and not words2:
-            return 1.0
-        if not words1 or not words2:
-            return 0.0
-            
-        intersection = words1.intersection(words2)
-        union = words1.union(words2)
-        
-        return len(intersection) / len(union) if union else 0.0
-    
-    def _find_text_overlap(self, text1: str, text2: str) -> str:
-        """Find overlapping portion between two texts and return merged result"""
-        words1 = text1.split()
-        words2 = text2.split()
-        
-        # Look for suffix of text1 that matches prefix of text2
-        max_overlap = 0
-        best_merge = text2  # Default to just using text2
-        
-        for i in range(1, min(len(words1), len(words2)) + 1):
-            suffix = words1[-i:]
-            prefix = words2[:i]
-            
-            if suffix == prefix:
-                max_overlap = i
-                # Merge: text1 + remaining part of text2
-                best_merge = text1 + " " + " ".join(words2[i:])
-        
-        # If significant overlap found, use merged version
-        if max_overlap > 0:
-            logger.debug(f"Found overlap of {max_overlap} words, merged: '{text1}' + '{text2}' -> '{best_merge}'")
-            return best_merge
-        
-        return text2  # No overlap, return new text
-    
     def _is_likely_hallucination(self, text: str) -> bool:
         """Enhanced detection of whisper hallucinations and non-speech tokens"""
         text_lower = text.lower().strip()
@@ -624,45 +587,6 @@ class WhisperCppStreamingSTTService(STTService):
         
         return False
 
-    def _handle_sliding_window_overlap(self, text: str) -> str:
-        """Handle overlapping transcriptions from sliding window chunks"""
-        if not hasattr(self, '_transcription_buffer'):
-            self._transcription_buffer = []
-        
-        # Clean old entries (keep last N transcriptions)
-        if len(self._transcription_buffer) > self._buffer_max_size:
-            self._transcription_buffer = self._transcription_buffer[-self._buffer_max_size:]
-        
-        # Check for exact duplicates
-        for prev_text, _ in self._transcription_buffer:
-            if text == prev_text:
-                logger.debug(f"Exact duplicate found, skipping: '{text}'")
-                return None
-        
-        # Check for high similarity (likely overlapping chunks)
-        for prev_text, _ in self._transcription_buffer:
-            similarity = self._calculate_text_similarity(text, prev_text)
-            
-            if similarity > self._overlap_threshold:
-                # High similarity detected - try to merge
-                merged_text = self._find_text_overlap(prev_text, text)
-                
-                # If merged text is significantly different from both inputs, use it
-                if (merged_text != text and merged_text != prev_text and 
-                    len(merged_text.split()) > max(len(text.split()), len(prev_text.split()))):
-                    logger.info(f"Merged overlapping transcriptions: '{merged_text}'")
-                    # Update buffer with merged result
-                    self._transcription_buffer = [(t, ts) for t, ts in self._transcription_buffer if t != prev_text]
-                    self._transcription_buffer.append((merged_text, time.time()))
-                    return merged_text
-                else:
-                    # Similar but can't merge well - skip this transcription
-                    logger.debug(f"High similarity ({similarity:.2f}) detected, skipping: '{text}'")
-                    return None
-        
-        # No significant overlap found - add to buffer and process
-        self._transcription_buffer.append((text, time.time()))
-        return text
 
     async def _handle_config_change(self, event_data: dict):
         """Handle configuration change events for dynamic language switching"""
@@ -756,6 +680,57 @@ class WhisperCppStreamingSTTService(STTService):
             if similarity >= self._similarity_threshold:
                 logger.info(f"🔍 TTS feedback detected (similarity: {similarity:.2f}): '{transcribed_text}' ≈ '{tts_text}'")
                 return True
+        
+        return False
+    
+    def _calculate_text_similarity(self, text1: str, text2: str) -> float:
+        """Calculate similarity between two text strings"""
+        if not text1 or not text2:
+            return 0.0
+        
+        # Simple word-based similarity
+        words1 = set(text1.lower().split())
+        words2 = set(text2.lower().split())
+        
+        if not words1 or not words2:
+            return 0.0
+        
+        intersection = len(words1.intersection(words2))
+        union = len(words1.union(words2))
+        
+        return intersection / union if union > 0 else 0.0
+    
+    def _handle_user_started_speaking(self):
+        """Handle VAD event when user starts speaking"""
+        self._user_is_speaking = True
+        self._speech_session_active = True
+        self._user_stopped_time = 0.0
+        logger.debug("🎤 VAD: User started speaking - accepting transcriptions")
+    
+    def _handle_user_stopped_speaking(self):
+        """Handle VAD event when user stops speaking"""
+        self._user_is_speaking = False
+        self._user_stopped_time = time.time()
+        logger.debug("🛑 VAD: User stopped speaking - will flush pending segments and stop accepting new ones")
+        
+        # Immediately flush any pending segments to complete the utterance
+        complete_utterance = self._boundary_detector.session_ended()
+        if complete_utterance:
+            logger.info(f"🚀 VAD-triggered utterance completion: '{complete_utterance}'")
+            self._emit_complete_utterance(complete_utterance)
+        
+        # Mark speech session as ending
+        self._speech_session_active = False
+    
+    def _should_accept_transcription(self) -> bool:
+        """Check if we should accept transcriptions based on VAD state"""
+        if self._user_is_speaking:
+            return True
+        
+        # Allow transcriptions for a short grace period after user stops speaking
+        if self._user_stopped_time > 0:
+            time_since_stopped = time.time() - self._user_stopped_time
+            return time_since_stopped <= self._vad_grace_period
         
         return False
             
@@ -934,6 +909,11 @@ class WhisperCppStreamingSTTService(STTService):
             
         line = line.strip()
         
+        # Check if we should accept this transcription based on VAD state
+        if not self._should_accept_transcription():
+            logger.debug(f"🚫 Rejecting late transcription (user stopped speaking): '{line}'")
+            return
+        
         # Handle transcription session markers
         if line.startswith("###"):
             self._handle_session_marker(line)
@@ -972,14 +952,11 @@ class WhisperCppStreamingSTTService(STTService):
         else:
             logger.debug(f"Segment added to buffer: '{segment.text}'")
             
-        # Simple timeout-based completion - just check basic timeout
+        # Check for timeout-based utterance completion
         timeout_utterance = self._boundary_detector.check_timeout()
-        logger.debug(f"Timeout check result: '{timeout_utterance}' (length: {len(timeout_utterance) if timeout_utterance else 0})")
-        if timeout_utterance and len(timeout_utterance.strip()) > 2:
+        if timeout_utterance:
             logger.info(f"Timeout-based utterance completion: '{timeout_utterance}'")
             self._emit_complete_utterance(timeout_utterance)
-        else:
-            logger.debug(f"No timeout emission - utterance too short or None")
             
     def _handle_session_marker(self, line: str):
         """Handle whisper-stream session start/end markers"""
@@ -1113,6 +1090,14 @@ class WhisperCppStreamingSTTService(STTService):
                     logger.info(f"Timeout-based utterance completion: '{timeout_utterance}'")
                     self._emit_complete_utterance(timeout_utterance)
                 
+                # More aggressive completion when user has stopped speaking
+                if (not self._user_is_speaking and self._user_stopped_time > 0 and 
+                    current_time - self._user_stopped_time > 0.5):  # 500ms after stop
+                    vad_completion = self._boundary_detector.session_ended()
+                    if vad_completion:
+                        logger.info(f"VAD-based completion after 500ms: '{vad_completion}'")
+                        self._emit_complete_utterance(vad_completion)
+                
                 # Check for idle timeout to save resources
                 if (self._last_activity_time > 0 and 
                     current_time - self._last_activity_time > self._idle_timeout and
@@ -1161,8 +1146,13 @@ class WhisperCppStreamingSTTService(STTService):
         # Capture the current event loop for thread-safe async calls
         self._loop = asyncio.get_event_loop()
         
-        # Don't auto-start process - start on-demand to save resources
-        logger.info("🎤 STT service ready - will start whisper-stream on first audio input")
+        # Pre-load model if not already done for fast first response
+        if not self._is_preloaded:
+            logger.info("🚀 Pre-loading whisper-stream for instant first transcription...")
+            await self._preload_model()
+        else:
+            logger.info("🎤 STT service ready - whisper-stream already pre-loaded")
+            
         self._last_activity_time = time.time()
         
         # Start timeout checker task
@@ -1192,6 +1182,12 @@ class WhisperCppStreamingSTTService(STTService):
     async def process_frame(self, frame: Frame, direction):
         """Process incoming audio frames"""
         await super().process_frame(frame, direction)
+        
+        # Handle VAD events
+        if isinstance(frame, UserStartedSpeakingFrame):
+            self._handle_user_started_speaking()
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            self._handle_user_stopped_speaking()
         
         # Start whisper-stream on-demand when audio is detected
         from pipecat.frames.frames import AudioRawFrame
