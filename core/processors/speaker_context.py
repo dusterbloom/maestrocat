@@ -48,6 +48,7 @@ class SpeakerContextProcessor(FrameProcessor):
         self.current_speaker = None
         self.speaker_confidence = 0.0
         self.speaker_history = []  # Track speaker changes
+        self._pending_system_message = None  # For queueing system messages
         
     def set_event_emitter(self, event_emitter):
         """Connect to event emitter to receive speaker events"""
@@ -91,7 +92,9 @@ class SpeakerContextProcessor(FrameProcessor):
             
             if auto_enrolled:
                 logger.info(f"New speaker auto-enrolled: {speaker_name}")
-                # Could send a system message about new speaker
+                # Queue a system message to trigger name question
+                self._pending_system_message = f"[System: New speaker detected and enrolled as {speaker_name}. This is their first time using the system.]"
+                logger.info(f"Queued system message for new speaker")
     
     async def _on_known_speaker_returned(self, event_data: Dict[str, Any]):
         """Handle when a known speaker returns"""
@@ -103,18 +106,9 @@ class SpeakerContextProcessor(FrameProcessor):
             if real_name:
                 logger.info(f"✨ Known speaker returned: {real_name}")
                 
-                # Send a system message to the LLM
-                # Create a transcription frame with system message that will be added to context
-                system_message = f"[System: Recognized returning user - {real_name} is back]"
-                # Use TranscriptionFrame so it gets aggregated into the LLM context
-                from pipecat.frames.frames import TranscriptionFrame
-                system_frame = TranscriptionFrame(
-                    text=system_message,
-                    user_id="system",
-                    timestamp=data.get('timestamp')
-                )
-                
-                await self.push_frame(system_frame)
+                # Queue a system message to the LLM
+                self._pending_system_message = f"[System: Recognized returning user - {real_name} is back]"
+                logger.info(f"Queued system message for returning speaker: {real_name}")
     
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames, enriching transcriptions with speaker info"""
@@ -122,6 +116,14 @@ class SpeakerContextProcessor(FrameProcessor):
         
         # Intercept transcription frames
         if isinstance(frame, TranscriptionFrame):
+            # Check if we have a pending system message to prepend
+            if self._pending_system_message:
+                # Prepend the system message to the transcription
+                original_text = frame.text
+                frame.text = f"{self._pending_system_message} {original_text}"
+                logger.info(f"Injected system message into transcription: {self._pending_system_message}")
+                self._pending_system_message = None  # Clear after using
+            
             # Get speaker info
             speaker = self.current_speaker or "unknown"
             

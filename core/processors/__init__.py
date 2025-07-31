@@ -9,6 +9,7 @@ from .config_handler import ConfigHandler
 from .audio_tee import AudioTeeProcessor
 from .speaker_context import SpeakerContextProcessor
 from .speaker_name_manager import SpeakerNameManager
+from .vad_event_bridge import VADEventBridge
 
 __all__ = [
     'InterruptionHandler',
@@ -19,5 +20,6 @@ __all__ = [
     'ConfigHandler',
     'AudioTeeProcessor',
     'SpeakerContextProcessor',
-    'SpeakerNameManager'
+    'SpeakerNameManager',
+    'VADEventBridge'
 ]

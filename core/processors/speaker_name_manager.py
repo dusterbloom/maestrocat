@@ -105,6 +105,9 @@ class SpeakerNameManager(FrameProcessor):
             text = frame.text.lower()
             self.last_assistant_message = text
             
+            # Log all assistant messages for debugging
+            logger.debug(f"Assistant message: {text[:100]}...")
+            
             # Detect if assistant is asking for a name
             name_patterns = [
                 "what's your name",
@@ -114,16 +117,25 @@ class SpeakerNameManager(FrameProcessor):
                 "who am i speaking with",
                 "who are you",
                 "what should i call you",
-                "how should i address you"
+                "how should i address you",
+                "come ti chiami",  # Italian
+                "qual è il tuo nome",  # Italian
+                "comment tu t'appelles",  # French
+                "quel est votre nom",  # French
+                "como te llamas",  # Spanish
+                "cuál es tu nombre",  # Spanish
+                "qual é o seu nome",  # Portuguese
+                "como você se chama"  # Portuguese
             ]
             
             if any(pattern in text for pattern in name_patterns):
                 self.waiting_for_name = True
-                logger.info("🎤 Assistant is asking for user's name")
+                logger.info(f"🎤 Assistant is asking for user's name (current speaker: {self.current_speaker})")
         
         # Monitor user responses for name introductions
         elif isinstance(frame, TranscriptionFrame) and self.waiting_for_name:
             text = frame.text
+            logger.info(f"📝 User response while waiting for name: '{text}' (speaker: {self.current_speaker})")
             
             # Try to extract name from common patterns
             name = self._extract_name(text)
@@ -135,6 +147,7 @@ class SpeakerNameManager(FrameProcessor):
                 self.waiting_for_name = False
                 
                 logger.info(f"✨ Associated name '{name}' with {self.current_speaker}")
+                logger.info(f"💾 Saved to speaker_names.json: {self.speaker_names}")
                 
                 # Update the frame metadata
                 if not hasattr(frame, 'metadata'):
@@ -148,6 +161,8 @@ class SpeakerNameManager(FrameProcessor):
                         'real_name': name,
                         'timestamp': datetime.now().isoformat()
                     })
+            else:
+                logger.info(f"❓ Could not extract name from '{text}' or speaker is unknown")
         
         # Always pass frame through
         await self.push_frame(frame, direction)
@@ -155,12 +170,17 @@ class SpeakerNameManager(FrameProcessor):
     def _extract_name(self, text: str) -> Optional[str]:
         """Extract name from user response"""
         text = text.strip()
+        logger.debug(f"Attempting to extract name from: '{text}'")
         
-        # Common patterns for name introduction
+        # Common patterns for name introduction (case insensitive)
         patterns = [
-            r"(?:my name is|i'm|i am|call me|it's|this is)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
-            r"^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)$",  # Just the name
-            r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:here|speaking)",
+            # English
+            r"(?:my name is|i'm|i am|call me|it's|this is|I go by)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)",
+            r"^([A-Za-z]+(?:\s+[A-Za-z]+)?)$",  # Just the name
+            r"([A-Za-z]+(?:\s+[A-Za-z]+)?)\s+(?:here|speaking)",
+            # Italian
+            r"(?:mi chiamo|sono|chiamami)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)",
+            # Add more language patterns as needed
         ]
         
         for pattern in patterns:
@@ -170,16 +190,19 @@ class SpeakerNameManager(FrameProcessor):
                 # Capitalize properly
                 name = ' '.join(word.capitalize() for word in name.split())
                 if len(name) > 1 and len(name) < 50:  # Reasonable name length
+                    logger.debug(f"Extracted name: '{name}' using pattern: {pattern}")
                     return name
         
         # If it's a short response (1-2 words), might just be the name
         words = text.split()
         if 1 <= len(words) <= 2:
             potential_name = ' '.join(word.capitalize() for word in words)
-            # Check if it looks like a name (starts with capital, no numbers)
-            if potential_name[0].isupper() and not any(char.isdigit() for char in potential_name):
+            # Check if it looks like a name (no numbers, reasonable characters)
+            if potential_name and not any(char.isdigit() for char in potential_name):
+                logger.debug(f"Extracted potential name from short response: '{potential_name}'")
                 return potential_name
         
+        logger.debug("No name found in text")
         return None
     
     def get_speaker_name(self, speaker_id: str) -> Optional[str]:

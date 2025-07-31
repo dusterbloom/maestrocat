@@ -3,11 +3,11 @@ import numpy as np
 import logging
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
-import hashlib
 import json
 import os
-from collections import defaultdict
+import asyncio
 
+from resemblyzer import VoiceEncoder
 from .voice_recognition_lightweight import LightweightVoiceRecognition
 
 logger = logging.getLogger(__name__)
@@ -25,13 +25,24 @@ class AutoEnrollVoiceRecognition(LightweightVoiceRecognition):
         
         # Auto-enrollment settings
         self.auto_enroll = config.get('auto_enroll', {})
-        self.min_utterances = self.auto_enroll.get('min_utterances', 3)  # Need 3 utterances to create profile
-        self.consistency_threshold = self.auto_enroll.get('consistency_threshold', 0.75)  # 75% similarity between samples
-        self.enrollment_window = self.auto_enroll.get('enrollment_window_minutes', 30)  # 30 minute window
+        self.min_utterances = self.auto_enroll.get('min_utterances', 3)
+        self.consistency_threshold = self.auto_enroll.get('consistency_threshold', 0.85)
+        self.min_consistency_threshold = self.auto_enroll.get('min_consistency_threshold', 0.70)
+        self.enrollment_window = self.auto_enroll.get('enrollment_window_minutes', 30)
         
-        # Track unknown speakers
-        self.unknown_fingerprints = defaultdict(list)  # fingerprint_hash -> list of (fingerprint, timestamp)
+        # Track unknown speakers with a session-based approach
         self.speaker_counter = 0
+        self.current_unknown_fingerprints = []
+        self.unknown_session_start_time = None
+
+        # For dynamic thresholding after enrollment
+        self.last_enrollment_time = None
+        self.new_speaker_grace_period = timedelta(seconds=self.auto_enroll.get('new_speaker_grace_period_seconds', 60))
+        self.new_speaker_similarity_threshold = self.auto_enroll.get('new_speaker_similarity_threshold', 0.65)
+        
+        # Initialize Resemblyzer VoiceEncoder
+        # Explicitly use CPU to avoid GPU detection overhead on macOS
+        self.encoder = VoiceEncoder("cpu")
         
         # Load any auto-enrolled profiles
         self._load_auto_profiles()
@@ -39,132 +50,104 @@ class AutoEnrollVoiceRecognition(LightweightVoiceRecognition):
         # Load speaker name mappings
         self._load_speaker_names()
     
-    def _process_speaker_identification(self):
-        """Enhanced identification with auto-enrollment"""
+    def _process_speaker_identification(self, audio_array: np.ndarray):
+        """Enhanced identification with auto-enrollment, processing a complete utterance."""
         try:
-            # Convert buffer to array
-            audio_array = np.array(list(self.audio_buffer))
+            fingerprint = self.encoder.embed_utterance(audio_array)
+            fingerprint = np.nan_to_num(fingerprint)
             
-            # Check audio energy
-            energy = np.sqrt(np.mean(audio_array ** 2))
-            if energy < 0.01:  # Silence threshold
-                return
-            
-            # Extract MFCC features
-            import librosa
-            mfcc = librosa.feature.mfcc(
-                y=audio_array, 
-                sr=self.sample_rate, 
-                n_mfcc=self.mfcc_features,
-                n_fft=512,
-                hop_length=256
-            )
-            
-            # Create fingerprint
-            fingerprint = np.concatenate([
-                np.mean(mfcc, axis=1),
-                np.std(mfcc, axis=1)
-            ])
-            
-            # First, check against known speakers
             best_match = None
             best_similarity = 0
             
             for speaker_name, stored_fingerprints in self.speakers.items():
                 for stored_fp in stored_fingerprints:
+                    if fingerprint.shape != stored_fp.shape:
+                        logger.warning(f"Skipping incompatible fingerprint for {speaker_name}.")
+                        continue
                     similarity = self._calculate_similarity(fingerprint, stored_fp)
                     if similarity > best_similarity:
                         best_similarity = similarity
                         best_match = speaker_name
             
-            # Check if we have a known speaker match
-            if best_match and best_similarity >= self.similarity_threshold:
+            if self.last_enrollment_time and (datetime.now() - self.last_enrollment_time) < self.new_speaker_grace_period:
+                active_similarity_threshold = self.new_speaker_similarity_threshold
+            else:
+                active_similarity_threshold = self.similarity_threshold
+
+            if best_match and best_similarity >= active_similarity_threshold:
                 if best_match != self.current_speaker:
                     self.current_speaker = best_match
                     logger.info(f"🎯 Speaker recognized: {best_match} (confidence: {best_similarity:.2f})")
                     
-                    # Check if this speaker has a real name
+                    # Check if we have a saved name for this speaker
                     if hasattr(self, 'speaker_names') and best_match in self.speaker_names:
                         real_name = self.speaker_names[best_match]
-                        logger.info(f"✨ This is {real_name}!")
+                        logger.info(f"✨ This is {real_name} returning!")
                         
-                        # Emit known speaker returned event
+                        # Emit a special event for known speakers returning
                         if self._event_emitter and hasattr(self, '_main_loop'):
-                            import asyncio
                             asyncio.run_coroutine_threadsafe(
                                 self._event_emitter.emit('known_speaker_returned', {
                                     'speaker_id': best_match,
                                     'real_name': real_name,
+                                    'confidence': best_similarity,
                                     'timestamp': datetime.now().isoformat()
                                 }),
                                 self._main_loop
                             )
                     
                     self._emit_speaker_change(best_match, best_similarity)
+
+                try:
+                    stored_centroid = self.speakers[best_match][0]
+                    alpha = 0.05
+                    updated_centroid = (1 - alpha) * stored_centroid + alpha * fingerprint
+                    updated_centroid /= np.linalg.norm(updated_centroid)
+                    self.speakers[best_match][0] = updated_centroid
+                    logger.debug(f"Adapted profile for {best_match} with new utterance.")
+                except (IndexError, KeyError) as e:
+                    logger.warning(f"Could not adapt profile for {best_match}: {e}")
             else:
-                # Unknown speaker - try auto-enrollment magic!
                 self._process_unknown_speaker(fingerprint)
                 
         except Exception as e:
             logger.error(f"Error in speaker identification: {e}")
     
     def _process_unknown_speaker(self, fingerprint: np.ndarray):
-        """Process unknown speaker for potential auto-enrollment"""
+        """Process unknown speaker for potential auto-enrollment using a session-based approach."""
         current_time = datetime.now()
-        
-        # Find which unknown speaker this might be
-        best_unknown_match = None
-        best_unknown_similarity = 0
-        
-        # Clean up old fingerprints outside enrollment window
-        cutoff_time = current_time - timedelta(minutes=self.enrollment_window)
-        
-        for fp_hash in list(self.unknown_fingerprints.keys()):
-            # Remove old entries
-            self.unknown_fingerprints[fp_hash] = [
-                (fp, ts) for fp, ts in self.unknown_fingerprints[fp_hash]
-                if ts > cutoff_time
-            ]
-            
-            # Remove empty entries
-            if not self.unknown_fingerprints[fp_hash]:
-                del self.unknown_fingerprints[fp_hash]
-                continue
-            
-            # Check similarity with this unknown speaker's fingerprints
-            similarities = []
-            for stored_fp, _ in self.unknown_fingerprints[fp_hash]:
-                sim = self._calculate_similarity(fingerprint, stored_fp)
-                similarities.append(sim)
-            
-            avg_similarity = np.mean(similarities)
-            if avg_similarity > best_unknown_similarity:
-                best_unknown_similarity = avg_similarity
-                best_unknown_match = fp_hash
-        
-        # Determine if this belongs to an existing unknown speaker or is new
-        if best_unknown_match and best_unknown_similarity >= self.consistency_threshold:
-            # Add to existing unknown speaker
-            self.unknown_fingerprints[best_unknown_match].append((fingerprint, current_time))
-            
-            # Check if we have enough samples for auto-enrollment
-            if len(self.unknown_fingerprints[best_unknown_match]) >= self.min_utterances:
-                self._auto_enroll_speaker(best_unknown_match)
-        else:
-            # New unknown speaker
-            fp_hash = hashlib.md5(fingerprint.tobytes()).hexdigest()[:8]
-            self.unknown_fingerprints[fp_hash].append((fingerprint, current_time))
-            
+
+        if self.unknown_session_start_time and (current_time - self.unknown_session_start_time) > timedelta(minutes=self.enrollment_window):
+            self.current_unknown_fingerprints = []
+            self.unknown_session_start_time = None
+
+        if not self.current_unknown_fingerprints:
+            self.current_unknown_fingerprints.append(fingerprint)
+            self.unknown_session_start_time = current_time
             if self.current_speaker != "unknown":
                 self.current_speaker = "unknown"
-                logger.info(f"👤 Unknown speaker detected")
+                logger.info("👤 Unknown speaker detected. Starting enrollment session.")
                 self._emit_speaker_change("unknown", 0)
-    
-    def _auto_enroll_speaker(self, fp_hash: str):
-        """Automatically enroll a speaker after gathering enough consistent samples"""
-        fingerprints = [fp for fp, _ in self.unknown_fingerprints[fp_hash]]
-        
-        # Verify consistency across all fingerprints
+            return
+
+        session_centroid = np.mean(self.current_unknown_fingerprints, axis=0)
+        similarity = self._calculate_similarity(fingerprint, session_centroid)
+
+        if similarity >= self.min_consistency_threshold:
+            self.current_unknown_fingerprints.append(fingerprint)
+            logger.debug(f"Collected {len(self.current_unknown_fingerprints)} consistent utterances for unknown speaker (similarity: {similarity:.2f}).")
+
+            if len(self.current_unknown_fingerprints) >= self.min_utterances:
+                self._auto_enroll_speaker(self.current_unknown_fingerprints)
+                self.current_unknown_fingerprints = []
+                self.unknown_session_start_time = None
+        else:
+            logger.warning(f"Inconsistent utterance from unknown speaker (similarity: {similarity:.2f} < {self.min_consistency_threshold}). Resetting session.")
+            self.current_unknown_fingerprints = [fingerprint]
+            self.unknown_session_start_time = current_time
+
+    def _auto_enroll_speaker(self, fingerprints: List[np.ndarray]):
+        """Automatically enroll a speaker after gathering enough consistent samples."""
         similarities = []
         for i in range(len(fingerprints)):
             for j in range(i + 1, len(fingerprints)):
@@ -174,26 +157,21 @@ class AutoEnrollVoiceRecognition(LightweightVoiceRecognition):
         avg_consistency = np.mean(similarities) if similarities else 0
         
         if avg_consistency >= self.consistency_threshold:
-            # Create new speaker profile
             self.speaker_counter += 1
             speaker_name = f"Speaker_{self.speaker_counter}"
             
-            # Store fingerprints
-            self.speakers[speaker_name] = fingerprints
+            centroid = np.mean(fingerprints, axis=0)
+            centroid /= np.linalg.norm(centroid)
+
+            self.speakers[speaker_name] = [centroid]
+            self._save_auto_profile(speaker_name, [centroid])
             
-            # Save profile
-            self._save_auto_profile(speaker_name, fingerprints)
-            
-            # Clean up unknown fingerprints
-            del self.unknown_fingerprints[fp_hash]
-            
-            # Update current speaker
             self.current_speaker = speaker_name
+            self.last_enrollment_time = datetime.now()
             
             logger.info(f"✨ Magic! Auto-enrolled new speaker: {speaker_name}")
             logger.info(f"   Learned from {len(fingerprints)} utterances with {avg_consistency:.2f} consistency")
             
-            # Emit enrollment event
             if self._event_emitter:
                 event_data = {
                     'speaker_id': speaker_name,
@@ -203,8 +181,6 @@ class AutoEnrollVoiceRecognition(LightweightVoiceRecognition):
                     'consistency': avg_consistency,
                     'timestamp': datetime.now().isoformat()
                 }
-                
-                # Emit both enrollment and change events
                 if hasattr(self, '_main_loop'):
                     import asyncio
                     asyncio.run_coroutine_threadsafe(
@@ -221,9 +197,8 @@ class AutoEnrollVoiceRecognition(LightweightVoiceRecognition):
                     )
     
     def _calculate_similarity(self, fp1: np.ndarray, fp2: np.ndarray) -> float:
-        """Calculate cosine similarity between fingerprints"""
-        import scipy.spatial.distance
-        return 1 - scipy.spatial.distance.cosine(fp1, fp2)
+        """Calculate cosine similarity between fingerprints."""
+        return np.dot(fp1, fp2)
     
     def _save_auto_profile(self, name: str, fingerprints: List[np.ndarray]):
         """Save auto-enrolled profile"""
@@ -258,7 +233,6 @@ class AutoEnrollVoiceRecognition(LightweightVoiceRecognition):
                     fingerprints = [np.array(fp) for fp in data['fingerprints']]
                     self.speakers[name] = fingerprints
                     
-                    # Update speaker counter
                     if name.startswith('Speaker_'):
                         try:
                             num = int(name.split('_')[1])
@@ -279,8 +253,6 @@ class AutoEnrollVoiceRecognition(LightweightVoiceRecognition):
                     data = json.load(f)
                     self.speaker_names = data.get('mappings', {})
                     logger.info(f"Loaded {len(self.speaker_names)} speaker name mappings")
-                    for speaker_id, name in self.speaker_names.items():
-                        logger.info(f"  {speaker_id} -> {name}")
             else:
                 self.speaker_names = {}
         except Exception as e:

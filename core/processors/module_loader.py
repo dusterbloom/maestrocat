@@ -58,8 +58,12 @@ class ModuleLoader(FrameProcessor):
             module = module_class(module_name, config)
             
             # Pass event emitter reference if module supports it
-            if hasattr(module, '_event_emitter') and self.event_emitter:
-                module._event_emitter = self.event_emitter
+            if self.event_emitter:
+                if hasattr(module, 'set_event_emitter'):
+                    module.set_event_emitter(self.event_emitter)
+                # For older modules that might just have the attribute
+                elif hasattr(module, '_event_emitter'):
+                    module._event_emitter = self.event_emitter
             
             # Initialize
             await module.initialize()
@@ -67,8 +71,8 @@ class ModuleLoader(FrameProcessor):
             # Store module
             self.modules[module_name] = module
             
-            # Subscribe to events if event emitter provided
-            if self.event_emitter:
+            # Subscribe to events if event emitter provided and module has on_event
+            if self.event_emitter and hasattr(module, 'on_event'):
                 self.event_emitter.subscribe("*", module.on_event)
                 
             logger.info(f"Loaded module: {module_name}")

@@ -29,7 +29,8 @@ from ..processors import (
     TranscriptionEventProcessor,
     AudioTeeProcessor,
     SpeakerContextProcessor,
-    SpeakerNameManager
+    SpeakerNameManager,
+    VADEventBridge
 )
 from ..processors.language_handler import LanguageHandler
 from ..processors.metrics_processor import MetricsProcessor
@@ -93,6 +94,7 @@ class MaestroCatAgent:
         self.voice_recognition_module = None
         self.speaker_context = None
         self.speaker_name_manager = None
+        self.vad_event_bridge = None
         
         # Services (created by strategy)
         self.stt = None
@@ -213,6 +215,10 @@ class MaestroCatAgent:
         self.audio_tee = AudioTeeProcessor(
             enabled=voice_enabled
         )
+        
+        # Create VAD event bridge
+        self.vad_event_bridge = VADEventBridge()
+        self.vad_event_bridge.set_event_emitter(self.event_emitter)
         
         # Create speaker processors if voice recognition is enabled
         if voice_enabled:
@@ -343,6 +349,9 @@ class MaestroCatAgent:
             # Input
             transport.input(),
             
+            # VAD Event Bridge (converts VAD frames to events)
+            self.vad_event_bridge,
+            
             # NEW: Turn metrics tracker (monitors user speaking frames)
             self.turn_metrics_tracker,
             
@@ -353,7 +362,8 @@ class MaestroCatAgent:
             self.stt,
         ]
         
-        # Add speaker processors after STT if voice recognition is enabled
+        # Add speaker processors BEFORE context aggregator if voice recognition is enabled
+        # They will enrich transcriptions before they reach the LLM
         if self.speaker_context:
             pipeline_components.append(self.speaker_context)
         if self.speaker_name_manager:
