@@ -29,7 +29,7 @@ from ..processors import (
     TranscriptionEventProcessor
 )
 from ..processors.language_handler import LanguageHandler
-from ..processors.turn_metrics_tracker import TurnMetricsTracker
+from ..processors.metrics_processor import MetricsProcessor
 # Removed complex metrics aggregator for now
 from .config import UnifiedMaestroCatConfig
 from ..modules import VoiceRecognitionModule, MemoryModule
@@ -178,7 +178,7 @@ class MaestroCatAgent:
         )
         
         # NEW: Create turn-based metrics tracker for developers
-        self.turn_metrics_tracker = TurnMetricsTracker(
+        self.turn_metrics_tracker = MetricsProcessor(
             event_emitter=self.event_emitter
         )
         
@@ -244,6 +244,17 @@ class MaestroCatAgent:
                 self.config.modules["memory"]
             )
             logger.info("✅ Memory module loaded")
+
+    async def forward_metrics_to_ui(self, websocket: WebSocket, event_name: str, metrics_data: dict):
+        """Forward metrics data to a specific WebSocket client."""
+        try:
+            await websocket.send_json({
+                "type": event_name, # Use the original event name
+                "data": metrics_data
+            })
+        except Exception:
+            # Ignore errors if the websocket is closed
+            pass
     
     async def create_pipeline(self, websocket: WebSocket) -> tuple[Pipeline, Any]:
         """
@@ -316,6 +327,17 @@ class MaestroCatAgent:
         # Track active WebSocket connection
         self._active_websockets.add(websocket)
         
+        # Create handlers that are specific to this websocket connection
+        async def metrics_update_handler(data):
+            await self.forward_metrics_to_ui(websocket, "metrics_update", data)
+
+        async def turn_metrics_handler(data):
+            await self.forward_metrics_to_ui(websocket, "turn_metrics", data)
+
+        # Subscribe the handlers to the metrics events
+        self.event_emitter.subscribe("metrics_update", metrics_update_handler)
+        self.event_emitter.subscribe("turn_metrics", turn_metrics_handler)
+        
         pipeline, transport = await self.create_pipeline(websocket)
         
         # Create pipeline task with platform-appropriate parameters
@@ -343,6 +365,9 @@ class MaestroCatAgent:
         except Exception as e:
             logger.error(f"Pipeline error: {e}")
         finally:
+            # Unsubscribe the handlers when the connection is closed
+            self.event_emitter.unsubscribe("metrics_update", metrics_update_handler)
+            self.event_emitter.unsubscribe("turn_metrics", turn_metrics_handler)
             # Remove from active connections
             self._active_websockets.discard(websocket)
             try:

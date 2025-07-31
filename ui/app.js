@@ -72,6 +72,15 @@ class MaestroCatDebugApp {
     this.websocket.on('message', (data) => {
       this.handleMessage(data);
     });
+
+    this.websocket.on('metrics:updated', (data) => {
+        this.state.updateMetrics(data);
+    });
+
+    this.websocket.on('turn:updated', (data) => {
+        this.ui.updateTurnMetrics(data);
+        this.state.updateTurnMetrics(data); // Also update the state for history
+    });
     
     // Audio events
     this.audio.on('connected', () => {

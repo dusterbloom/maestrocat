@@ -35,8 +35,14 @@ export class WebSocketManager extends EventEmitter {
       
       this.ws.onmessage = (event) => {
         try {
-          const data = JSON.parse(event.data);
-          this.emit('message', data);
+          const message = JSON.parse(event.data);
+          if (message.type === 'metrics_update') {
+            this.emit('metrics:updated', message.data);
+          } else if (message.type === 'turn_metrics') {
+            this.emit('turn:updated', message.data);
+          } else {
+            this.emit('message', message);
+          }
         } catch (error) {
           console.error('Failed to parse WebSocket message:', error);
         }
