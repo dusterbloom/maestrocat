@@ -148,8 +148,9 @@ class LightweightVoiceRecognition(MaestroCatModule):
                 except Exception as e:
                     logger.error(f"Error loading profile {name}: {e}")
 
-    async def on_event(self, event_data: Any):
-        """This method is no longer used for VAD but can be used for other events if needed."""
+    async def on_event(self, event_type: str, data: Any):
+        """Handle events from the pipeline using standard MaestroCatModule interface."""
+        # Voice recognition primarily works through audio processing, not events
         pass
         
     async def shutdown(self):

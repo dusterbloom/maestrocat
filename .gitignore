@@ -36,3 +36,4 @@ logs/
 whisper.cpp/
 
 data/speaker_profiles/auto_enrolled/*.json
+data/memory/

@@ -89,8 +89,22 @@ modules:
       queue_size: 100  # Max audio chunks in processing queue
       use_gpu: false  # Disable GPU for CPU optimization on macOS
   memory:
-    enabled: false
-    max_history: 100
+    enabled: true
+    type: "sqlite"  # Using SQLite for persistent storage
+    database_path: "data/memory/conversations.db"
+    max_history: 1000  # Maximum messages to keep per session
+    enable_search: true  # Enable conversation search
+    context_window_minutes: 30  # Time window for context retrieval
+    # Context injection settings for LLM
+    context_injection:
+      enabled: true
+      max_messages: 5  # Number of recent messages to inject
+      time_window_minutes: 5  # Recent context time window
+    # Database maintenance
+    cleanup:
+      enabled: true
+      retention_days: 30  # Keep conversations for 30 days
+      cleanup_interval_hours: 24  # Run cleanup daily
 
 # Development settings (universal)
 development:

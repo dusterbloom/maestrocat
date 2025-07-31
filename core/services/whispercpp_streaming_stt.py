@@ -1317,14 +1317,14 @@ class WhisperCppStreamingSTTService(STTService):
             self._handle_user_stopped_speaking()
         
         # Start whisper-stream on-demand when audio is detected
-        from pipecat.frames.frames import AudioRawFrame
-        if isinstance(frame, AudioRawFrame) and not self._is_running:
+        from pipecat.frames.frames import AudioRawFrame, InputAudioRawFrame, UserAudioRawFrame
+        if isinstance(frame, (AudioRawFrame, InputAudioRawFrame, UserAudioRawFrame)) and not self._is_running:
             logger.info("🎤 Audio detected - starting whisper-stream on-demand")
             self._start_streaming_process()
             self._last_activity_time = time.time()
         
         # Update activity time for any audio frame
-        if isinstance(frame, AudioRawFrame):
+        if isinstance(frame, (AudioRawFrame, InputAudioRawFrame, UserAudioRawFrame)):
             self._last_activity_time = time.time()
         
         # Note: whisper-stream captures audio directly via SDL2

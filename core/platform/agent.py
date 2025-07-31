@@ -26,7 +26,6 @@ from ..processors import (
     MetricsCollector,
     EventEmitter,
     ModuleLoader,
-    TranscriptionEventProcessor,
     AudioTeeProcessor,
     SpeakerContextProcessor,
     SpeakerNameManager,
@@ -209,6 +208,11 @@ class MaestroCatAgent:
             ack_delay=self.config.interruption.ack_delay
         )
         
+        # Store memory configuration for later use
+        self.memory_config = self.config.modules.get("memory", {})
+        if self.memory_config.get("enabled", False):
+            logger.info("✅ Memory system enabled")
+        
         # Create audio tee processor for voice recognition
         voice_enabled = self.config.modules.get("voice_recognition", {}).get("enabled", False)
         logger.info(f"Creating AudioTeeProcessor with voice recognition enabled: {voice_enabled}")
@@ -373,7 +377,12 @@ class MaestroCatAgent:
         pipeline_components.extend([
             # User context aggregation (TranscriptionFrame → LLM trigger)
             context_aggregator.user(),
-            
+        ])
+        
+        # Memory is handled via events in the MemoryModule, not as a processor
+        
+        # Continue with LLM and TTS
+        pipeline_components.extend([
             # LLM
             self.llm,
             
@@ -642,6 +651,8 @@ class MaestroCatAgent:
             
             # Clean up platform-specific resources
             await self.strategy.cleanup()
+            
+            # Memory processor cleanup is handled by pipeline teardown
             
             # Clean up debug UI
             if self.debug_ui:

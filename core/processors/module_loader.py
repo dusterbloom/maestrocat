@@ -44,6 +44,8 @@ class ModuleLoader(FrameProcessor):
         super().__init__()
         self.modules: Dict[str, MaestroCatModule] = {}
         self.event_emitter = event_emitter
+        # Store event wrappers for cleanup
+        self._event_wrappers: Dict[str, Any] = {}
         
     async def load_module(
         self,
@@ -73,20 +75,26 @@ class ModuleLoader(FrameProcessor):
             
             # Subscribe to events if event emitter provided and module has on_event
             if self.event_emitter and hasattr(module, 'on_event'):
-                self.event_emitter.subscribe("*", module.on_event)
+                # Create a wrapper that always passes event_type and data separately
+                # This is the standard MaestroCatModule interface
+                async def module_event_wrapper(event):
+                    event_type = event.get("type", "")
+                    data = event.get("data", {})
+                    await module.on_event(event_type, data)
+                
+                # Store wrapper for cleanup
+                self._event_wrappers[module_name] = module_event_wrapper
+                self.event_emitter.subscribe("*", module_event_wrapper)
                 
             logger.info(f"Loaded module: {module_name}")
             
-            # Emit module loaded event
-            # Use TextFrame to carry module event data
-            event_data = json.dumps({
-                "type": "module_loaded", 
-                "data": {
+            # Don't emit frames during setup - the pipeline hasn't started yet
+            # If we need to notify about module loading, use the event emitter instead
+            if self.event_emitter:
+                await self.event_emitter.emit("module_loaded", {
                     "name": module_name,
                     "config": config
-                }
-            })
-            await self.push_frame(TextFrame(event_data))
+                })
             
             return module
             
@@ -103,23 +111,20 @@ class ModuleLoader(FrameProcessor):
             await module.cleanup()
             
             # Unsubscribe from events
-            if self.event_emitter:
-                self.event_emitter.unsubscribe("*", module.on_event)
+            if self.event_emitter and module_name in self._event_wrappers:
+                self.event_emitter.unsubscribe("*", self._event_wrappers[module_name])
+                del self._event_wrappers[module_name]
                 
             # Remove module
             del self.modules[module_name]
             
             logger.info(f"Unloaded module: {module_name}")
             
-            # Emit event
-            # Use TextFrame to carry module event data
-            event_data = json.dumps({
-                "type": "module_unloaded",
-                "data": {
+            # Use event emitter instead of frames during setup/teardown
+            if self.event_emitter:
+                await self.event_emitter.emit("module_unloaded", {
                     "name": module_name
-                }
-            })
-            await self.push_frame(TextFrame(event_data))
+                })
             
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Allow modules to process frames"""

@@ -52,14 +52,21 @@ class TranscriptionEventProcessor(FrameProcessor):
                 self._last_emitted_text = frame.text
                 self._last_emission_time = current_time
                 
-                # Emit transcription event for debug UI
-                await self._event_emitter.emit("transcription_final", {
+                # Emit transcription events
+                event_data = {
                     "text": frame.text,
                     "confidence": 1.0,  # MLX Whisper doesn't provide confidence
                     "timestamp": current_time,
                     "user_id": frame.user_id or "user"
-                })
-                logger.debug(f"Emitted transcription event: '{frame.text}'")
+                }
+                
+                # Emit for debug UI
+                await self._event_emitter.emit("transcription_final", event_data)
+                
+                # Emit for memory module
+                await self._event_emitter.emit("transcription_complete", event_data)
+                
+                logger.debug(f"Emitted transcription events: '{frame.text}'")
         
         # Always pass the frame through
         await self.push_frame(frame, direction)

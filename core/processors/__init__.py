@@ -10,6 +10,7 @@ from .audio_tee import AudioTeeProcessor
 from .speaker_context import SpeakerContextProcessor
 from .speaker_name_manager import SpeakerNameManager
 from .vad_event_bridge import VADEventBridge
+from .memory_processor import MemoryProcessor
 
 __all__ = [
     'InterruptionHandler',
@@ -21,5 +22,6 @@ __all__ = [
     'AudioTeeProcessor',
     'SpeakerContextProcessor',
     'SpeakerNameManager',
-    'VADEventBridge'
+    'VADEventBridge',
+    'MemoryProcessor'
 ]
