@@ -23,6 +23,7 @@ import signal
 import sys
 from pathlib import Path
 from typing import Optional
+import select
 
 # Add the project root to Python path
 sys.path.append(str(Path(__file__).parent))
@@ -268,6 +269,31 @@ class MaestroCatLauncher:
             print(f"  {service.upper()}: {model}")
         print(f"=" * 50)
 
+    def blocking_keyboard_monitor(self, loop: asyncio.AbstractEventLoop):
+        """
+        Runs in a separate thread to monitor for 'q' key press.
+        Uses select to avoid blocking on stdin.
+        """
+        print("Press 'q' and Enter to quit at any time.")
+        while not self.signal_handler.is_shutting_down():
+            try:
+                # Wait for input on stdin with a 1-second timeout
+                ready, _, _ = select.select([sys.stdin], [], [], 1.0)
+                if ready:
+                    line = sys.stdin.readline()
+                    if line.strip().lower() == 'q':
+                        print("\n'q' pressed, initiating shutdown...")
+                        # Schedule the shutdown coroutine on the main event loop
+                        asyncio.run_coroutine_threadsafe(self.signal_handler.shutdown(), loop)
+                        break  # Exit the monitoring loop
+            except (ValueError, OSError):
+                # This can happen if stdin is closed (e.g., in a non-interactive script)
+                logger.debug("Stdin not available for keyboard monitoring.")
+                break
+            except Exception as e:
+                logger.error(f"Error in keyboard monitor: {e}")
+                break
+
 
 def main():
     """Main entry point with robust signal handling"""
@@ -391,38 +417,53 @@ Configuration:
             return 0 if success else 1
         
         # Run the agent
-        return await launcher.run_agent(
+        exit_code = await launcher.run_agent(
             config_file=args.config,
             platform_type=platform_type,
             host=args.host,
             port=args.port,
             language=args.language
         )
+        # Final cleanup
+        await launcher.cleanup()
+        return exit_code
+
     
     # Run the launcher with signal handling
     try:
         # Get the signal handler instance
         signal_handler = get_signal_handler()
-        
-        # Create event loop
+
+        # Create event loop and shutdown future
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        
-        # Register the loop with signal handler
-        signal_handler.register_loop(loop)
-        
-        # Set up signal handlers
+        shutdown_future = loop.create_future()
+
+        # Register the loop and future with signal handler
+        signal_handler.register_loop(loop, shutdown_future)
+
+        # Set up OS signal handlers
         setup_signal_handlers()
-        
+
+        # Start the blocking keyboard monitor in a separate thread
+        loop.run_in_executor(None, launcher.blocking_keyboard_monitor, loop)
+
         # Run the main async function
         try:
-            exit_code = loop.run_until_complete(run())
+            # The main task will run until the shutdown_future is set
+            main_task = loop.create_task(run())
+            loop.run_until_complete(shutdown_future)
+            
+            # Once shutdown is triggered, we cancel the main task and gather results
+            main_task.cancel()
+            loop.run_until_complete(main_task)
+            exit_code = main_task.result() if main_task.done() else 1
+
+        except asyncio.CancelledError:
+            exit_code = 0 # Normal exit
         finally:
-            # Ensure loop cleanup
-            pending = asyncio.all_tasks(loop)
-            for task in pending:
-                task.cancel()
-            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            # Final cleanup
+            logger.info("Closing event loop.")
             loop.close()
         
         sys.exit(exit_code)

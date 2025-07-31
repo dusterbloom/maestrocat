@@ -6,6 +6,7 @@ import logging
 import threading
 import subprocess
 import os
+import signal
 from typing import AsyncGenerator, Optional, Dict, Any, List
 from dataclasses import dataclass
 from enum import Enum
@@ -487,12 +488,14 @@ class WhisperCppStreamingSTTService(STTService):
         logger.info(f"Starting whisper.cpp stream: {' '.join(cmd)}")
         
         try:
+            # Start the process in a new session to control the entire process group
             self._whisper_process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 bufsize=1,  # Line buffering for real-time output
-                universal_newlines=True
+                universal_newlines=True,
+                preexec_fn=os.setsid  # This is the crucial part!
             )
             
             # Check if process started successfully
@@ -774,20 +777,30 @@ class WhisperCppStreamingSTTService(STTService):
             self._needs_restart = True  # Mark for retry
 
     def _stop_streaming_process(self):
-        """Stop the whisper.cpp streaming process"""
-        if self._whisper_process:
+        """Stop the whisper.cpp streaming process and its entire process group."""
+        if self._whisper_process and self._whisper_process.poll() is None:
             try:
-                logger.info(f"🛑 Terminating whisper-stream process (PID: {self._whisper_process.pid})")
-                self._whisper_process.terminate()
+                # Get the process group ID (PGID)
+                pgid = os.getpgid(self._whisper_process.pid)
+                logger.info(f"🛑 Terminating whisper-stream process group (PGID: {pgid})")
+                
+                # Send SIGTERM to the entire process group
+                os.killpg(pgid, signal.SIGTERM)
+                
+                # Wait for the process to terminate
                 self._whisper_process.wait(timeout=3)
-                logger.info("✅ Process terminated gracefully")
+                logger.info("✅ Process group terminated gracefully")
+
             except subprocess.TimeoutExpired:
-                logger.warning("⚠️ Process didn't terminate gracefully, forcing kill")
-                self._whisper_process.kill()
+                logger.warning("⚠️ Process group didn't terminate gracefully, forcing kill (SIGKILL)")
+                pgid = os.getpgid(self._whisper_process.pid)
+                os.killpg(pgid, signal.SIGKILL)
                 self._whisper_process.wait(timeout=2)
-                logger.info("✅ Process killed forcefully")
+                logger.info("✅ Process group killed forcefully")
+            except ProcessLookupError:
+                logger.info("Process already terminated.")
             except Exception as e:
-                logger.error(f"❌ Error stopping whisper.cpp process: {e}")
+                logger.error(f"❌ Error stopping whisper.cpp process group: {e}")
                 
         self._whisper_process = None
         self._is_running = False
