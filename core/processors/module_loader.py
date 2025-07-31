@@ -49,13 +49,17 @@ class ModuleLoader(FrameProcessor):
         self,
         module_class: Type[MaestroCatModule],
         config: Dict[str, Any]
-    ):
+    ) -> MaestroCatModule:
         """Load a module into the system"""
         module_name = config.get("name", module_class.__name__)
         
         try:
             # Create module instance
             module = module_class(module_name, config)
+            
+            # Pass event emitter reference if module supports it
+            if hasattr(module, '_event_emitter') and self.event_emitter:
+                module._event_emitter = self.event_emitter
             
             # Initialize
             await module.initialize()
@@ -79,6 +83,8 @@ class ModuleLoader(FrameProcessor):
                 }
             })
             await self.push_frame(TextFrame(event_data))
+            
+            return module
             
         except Exception as e:
             logger.error(f"Failed to load module {module_name}: {e}")

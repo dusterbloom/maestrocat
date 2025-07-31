@@ -6,6 +6,9 @@ from .event_emitter import EventEmitter
 from .module_loader import ModuleLoader
 from .transcription_events import TranscriptionEventProcessor
 from .config_handler import ConfigHandler
+from .audio_tee import AudioTeeProcessor
+from .speaker_context import SpeakerContextProcessor
+from .speaker_name_manager import SpeakerNameManager
 
 __all__ = [
     'InterruptionHandler',
@@ -13,5 +16,8 @@ __all__ = [
     'EventEmitter',
     'ModuleLoader',
     'TranscriptionEventProcessor',
-    'ConfigHandler'
+    'ConfigHandler',
+    'AudioTeeProcessor',
+    'SpeakerContextProcessor',
+    'SpeakerNameManager'
 ]

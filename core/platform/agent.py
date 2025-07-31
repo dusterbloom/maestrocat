@@ -26,13 +26,16 @@ from ..processors import (
     MetricsCollector,
     EventEmitter,
     ModuleLoader,
-    TranscriptionEventProcessor
+    TranscriptionEventProcessor,
+    AudioTeeProcessor,
+    SpeakerContextProcessor,
+    SpeakerNameManager
 )
 from ..processors.language_handler import LanguageHandler
 from ..processors.metrics_processor import MetricsProcessor
 # Removed complex metrics aggregator for now
 from .config import UnifiedMaestroCatConfig
-from ..modules import VoiceRecognitionModule, MemoryModule
+from ..modules import VoiceRecognitionModule, LightweightVoiceRecognition, AutoEnrollVoiceRecognition, MemoryModule
 from ..apps.debug_ui import DebugUIServer
 
 logger = logging.getLogger(__name__)
@@ -86,6 +89,10 @@ class MaestroCatAgent:
         self.module_loader = None
         self.debug_ui = None
         self.interruption_handler = None
+        self.audio_tee = None
+        self.voice_recognition_module = None
+        self.speaker_context = None
+        self.speaker_name_manager = None
         
         # Services (created by strategy)
         self.stt = None
@@ -199,6 +206,29 @@ class MaestroCatAgent:
             threshold=self.config.interruption.threshold,
             ack_delay=self.config.interruption.ack_delay
         )
+        
+        # Create audio tee processor for voice recognition
+        voice_enabled = self.config.modules.get("voice_recognition", {}).get("enabled", False)
+        logger.info(f"Creating AudioTeeProcessor with voice recognition enabled: {voice_enabled}")
+        self.audio_tee = AudioTeeProcessor(
+            enabled=voice_enabled
+        )
+        
+        # Create speaker processors if voice recognition is enabled
+        if voice_enabled:
+            # Create name manager first
+            self.speaker_name_manager = SpeakerNameManager(
+                profile_dir=self.config.modules.get("voice_recognition", {}).get("profile_dir", "data/speaker_profiles")
+            )
+            self.speaker_name_manager.set_event_emitter(self.event_emitter)
+            
+            # Create context processor with name manager
+            self.speaker_context = SpeakerContextProcessor(
+                format_style="natural",  # Natural, unobtrusive style
+                unknown_speaker_name="User",
+                name_manager=self.speaker_name_manager
+            )
+            self.speaker_context.set_event_emitter(self.event_emitter)
     
     async def _create_services(self):
         """Create platform-specific services using the strategy"""
@@ -229,13 +259,27 @@ class MaestroCatAgent:
     
     async def _load_modules(self):
         """Load configured modules"""
+        logger.info(f"Loading modules with config: {self.config.modules}")
+        
         # Load voice recognition module
-        if self.config.modules.get("voice_recognition", {}).get("enabled", False):
-            await self.module_loader.load_module(
-                VoiceRecognitionModule,
+        voice_config = self.config.modules.get("voice_recognition", {})
+        logger.info(f"Voice recognition config: {voice_config}")
+        
+        if voice_config.get("enabled", False):
+            # Use auto-enrolling version for magical experience
+            self.voice_recognition_module = await self.module_loader.load_module(
+                AutoEnrollVoiceRecognition,
                 self.config.modules["voice_recognition"]
             )
-            logger.info("✅ Voice recognition module loaded")
+            
+            # Register it with the audio tee processor
+            if self.voice_recognition_module and self.audio_tee:
+                # Register the module's process_audio method as a consumer
+                self.audio_tee.register_audio_consumer(
+                    self.voice_recognition_module.process_audio
+                )
+            
+            logger.info("✅ Voice recognition module loaded and connected")
         
         # Load memory module
         if self.config.modules.get("memory", {}).get("enabled", False):
@@ -292,16 +336,31 @@ class MaestroCatAgent:
         language_handler = LanguageHandler(context, self.debug_ui.event_emitter, self.config)
         
         # Build the pipeline
-        pipeline = Pipeline([
+        logger.info(f"Building pipeline with AudioTee enabled: {self.audio_tee._enabled if self.audio_tee else 'No AudioTee'}")
+        
+        # Build pipeline components list
+        pipeline_components = [
             # Input
             transport.input(),
             
             # NEW: Turn metrics tracker (monitors user speaking frames)
             self.turn_metrics_tracker,
             
+            # NEW: Audio tee for voice recognition (non-blocking)
+            self.audio_tee,
+            
             # STT
             self.stt,
-            
+        ]
+        
+        # Add speaker processors after STT if voice recognition is enabled
+        if self.speaker_context:
+            pipeline_components.append(self.speaker_context)
+        if self.speaker_name_manager:
+            pipeline_components.append(self.speaker_name_manager)
+        
+        # Continue with rest of pipeline
+        pipeline_components.extend([
             # User context aggregation (TranscriptionFrame → LLM trigger)
             context_aggregator.user(),
             
@@ -317,6 +376,9 @@ class MaestroCatAgent:
             # Assistant context aggregation (LLM response handling)
             context_aggregator.assistant(),
         ])
+        
+        # Create pipeline with all components
+        pipeline = Pipeline(pipeline_components)
         
         return pipeline, transport
     

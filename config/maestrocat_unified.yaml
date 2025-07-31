@@ -9,7 +9,7 @@ language_config:
   en:
     voice: "af_bella"
     stt_language: "en"
-    system_prompt: "You are MaestroCat, a helpful AI voice assistant. Keep responses brief and conversational for real-time voice interaction. If interrupted, acknowledge it naturally and continue."
+    system_prompt: "You are MaestroCat, a helpful AI voice assistant. Keep responses brief and conversational for real-time voice interaction. If interrupted, acknowledge it naturally and continue. When meeting someone new, politely ask for their name to personalize the conversation. When you receive a [System: Recognized returning user - NAME is back] message, greet them warmly by name."
   it:
     voice: "if_sara"
     stt_language: "it"
@@ -57,8 +57,26 @@ interruption:
 # Module configuration (universal)
 modules:
   voice_recognition:
-    enabled: false
-    model: "speechbrain/spkrec-ecapa-voxceleb"
+    enabled: true
+    model: "speechbrain"  # Options: "speechbrain", "pyannote", "mock"
+    sample_rate: 16000
+    window_size: 3.0  # seconds of audio for analysis
+    confidence_threshold: 0.85  # Minimum confidence for speaker identification
+    min_speech_duration: 1.0  # Minimum speech before attempting identification
+    profile_dir: "data/speaker_profiles"  # Directory for speaker profiles
+    # Automatic enrollment - the magic happens here!
+    auto_enroll:
+      min_utterances: 3  # Learn a voice after 3 consistent utterances
+      consistency_threshold: 0.75  # 75% similarity required between samples
+      enrollment_window_minutes: 30  # Consider utterances within 30 minute window
+    # Speaker enrollment settings
+    enrollment:
+      min_samples: 3  # Minimum audio samples for enrollment
+      sample_duration: 3.0  # Duration of each enrollment sample
+    # Performance settings
+    performance:
+      queue_size: 100  # Max audio chunks in processing queue
+      use_gpu: true  # Use GPU acceleration if available
   memory:
     enabled: false
     max_history: 100
