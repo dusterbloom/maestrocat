@@ -7,9 +7,10 @@ import threading
 import subprocess
 import os
 import signal
-from typing import AsyncGenerator, Optional, Dict, Any, List
+from typing import AsyncGenerator, Optional, Dict, Any, List, Deque
 from dataclasses import dataclass
 from enum import Enum
+from collections import deque
 
 from pipecat.frames.frames import Frame, TranscriptionFrame, UserStartedSpeakingFrame, UserStoppedSpeakingFrame
 from pipecat.services.stt_service import STTService
@@ -52,14 +53,16 @@ class UtteranceBoundaryDetector:
         self,
         silence_threshold_ms: float = 500.0,  # Gap indicating utterance boundary
         completion_timeout_ms: float = 2000.0,  # Max time to wait for more segments
-        min_utterance_length: int = 2  # Minimum characters for valid utterance
+        min_utterance_length: int = 2,  # Minimum characters for valid utterance
+        max_buffer_size: int = 100  # Maximum segments to buffer (prevent memory leak)
     ):
         self.silence_threshold = silence_threshold_ms / 1000.0  # Convert to seconds
         self.completion_timeout = completion_timeout_ms / 1000.0
         self.min_utterance_length = min_utterance_length
+        self.max_buffer_size = max_buffer_size
         
-        # Segment buffering
-        self._segment_buffer: List[TranscriptionSegment] = []
+        # Segment buffering with size limit
+        self._segment_buffer: Deque[TranscriptionSegment] = deque(maxlen=max_buffer_size)
         self._last_segment_time = 0.0
         self._transcription_session_id = None
         self._session_start_time = 0.0
@@ -89,7 +92,8 @@ class UtteranceBoundaryDetector:
         if self._segment_buffer and segment.start_time > self._segment_buffer[-1].end_time + self.silence_threshold:
             # Silence gap detected - finalize current utterance and start new one
             complete_utterance = self._finalize_current_utterance()
-            self._segment_buffer = [segment]
+            self._segment_buffer.clear()
+            self._segment_buffer.append(segment)
             self._last_segment_time = current_time
             return complete_utterance
             
@@ -132,7 +136,7 @@ class UtteranceBoundaryDetector:
         """Start a new transcription session"""
         self._transcription_session_id = session_id
         self._session_start_time = current_time
-        self._segment_buffer = []
+        self._segment_buffer.clear()
         
     def _finalize_current_utterance(self) -> Optional[str]:
         """Finalize the current utterance and return the complete text"""
@@ -140,13 +144,13 @@ class UtteranceBoundaryDetector:
             return None
             
         # Sort segments by start time to ensure proper order
-        sorted_segments = sorted(self._segment_buffer, key=lambda x: x.start_time)
+        sorted_segments = sorted(list(self._segment_buffer), key=lambda x: x.start_time)
         
         # Merge overlapping or adjacent segments
         merged_text = self._merge_segments(sorted_segments)
         
         # Clear buffer
-        self._segment_buffer = []
+        self._segment_buffer.clear()
         self._transcription_session_id = None
         
         # Return complete utterance if meets minimum length
@@ -221,11 +225,12 @@ class WhisperCppStreamingSTTService(STTService):
         self._last_emission_time = 0.0
         self._dedup_time_window = 2.0  # 2 seconds window for deduplication
         
-        # Utterance boundary detection
+        # Utterance boundary detection with memory limit
         self._boundary_detector = UtteranceBoundaryDetector(
             silence_threshold_ms=800.0,   # 800ms gap indicates utterance boundary (reduced from 1200ms)
             completion_timeout_ms=1500.0, # 1.5s timeout for incomplete utterances (reduced from 2.5s)
-            min_utterance_length=3        # Minimum 3 characters for valid utterance
+            min_utterance_length=3,       # Minimum 3 characters for valid utterance
+            max_buffer_size=100          # Prevent unbounded memory growth
         )
         
         # VAD-aware transcription control
@@ -251,7 +256,10 @@ class WhisperCppStreamingSTTService(STTService):
         
         # Timeout checker task
         self._timeout_checker_task = None
-        self._timeout_check_interval = 1.0  # Check every second
+        
+        # Thread pool for efficient thread reuse
+        self._thread_pool = None
+        self._thread_pool_size = 2  # stdout and stderr readers
         
         # Adaptive processing for thermal management
         self._consecutive_silence_count = 0
@@ -261,9 +269,11 @@ class WhisperCppStreamingSTTService(STTService):
         self._original_language = language  # Store original for comparison
         self._config_language = language  # Track config language separately
         self._needs_restart = False  # Flag to track if restart is needed
+        self._language_switch_pending = False  # Track pending language switches
+        self._language_switch_queue = []  # Queue language switches
         
-        # Audio feedback prevention
-        self._recent_tts_texts = []  # Store recent TTS outputs to prevent feedback
+        # Audio feedback prevention with bounded memory
+        self._recent_tts_texts: Deque[tuple[str, float]] = deque(maxlen=50)  # Bounded to prevent memory leak
         self._tts_buffer_duration = 10.0  # Keep TTS texts for 10 seconds
         self._similarity_threshold = 0.85  # Threshold for detecting TTS echo
         self._paused_for_tts = False  # Track if paused due to TTS playback
@@ -271,6 +281,12 @@ class WhisperCppStreamingSTTService(STTService):
         # Process resource management
         self._idle_timeout = 30.0  # Stop process after 30s of no activity
         self._last_activity_time = 0.0
+        
+        # Performance optimization: adaptive timeout checking
+        self._timeout_check_interval = 1.0  # Initial check interval
+        self._min_timeout_interval = 0.5    # Minimum during activity
+        self._max_timeout_interval = 5.0    # Maximum during idle
+        self._timeout_backoff_factor = 1.5  # Exponential backoff factor
         
         # Find whisper.cpp stream binary
         self._stream_binary = self._find_stream_binary()
@@ -504,18 +520,14 @@ class WhisperCppStreamingSTTService(STTService):
             logger.info(f"Stdout readable: {self._whisper_process.stdout.readable()}")
             logger.info(f"Stderr readable: {self._whisper_process.stderr.readable()}")
             
-            # Start output reading threads
-            self._stdout_thread = threading.Thread(
-                target=self._read_stdout,
-                daemon=True
-            )
-            self._stderr_thread = threading.Thread(
-                target=self._read_stderr,
-                daemon=True
-            )
+            # Initialize thread pool if not exists
+            if not self._thread_pool:
+                from concurrent.futures import ThreadPoolExecutor
+                self._thread_pool = ThreadPoolExecutor(max_workers=self._thread_pool_size)
             
-            self._stdout_thread.start()
-            self._stderr_thread.start()
+            # Submit reading tasks to thread pool
+            self._stdout_future = self._thread_pool.submit(self._read_stdout)
+            self._stderr_future = self._thread_pool.submit(self._read_stderr)
             
             self._is_running = True
             logger.info("Whisper.cpp streaming process started successfully")
@@ -634,12 +646,8 @@ class WhisperCppStreamingSTTService(STTService):
             text = event_data.get("text", "")
             if text:
                 current_time = time.time()
+                # Add to deque (automatically removes oldest if at maxlen)
                 self._recent_tts_texts.append((text.lower().strip(), current_time))
-                # Clean old entries
-                self._recent_tts_texts = [
-                    (t, ts) for t, ts in self._recent_tts_texts 
-                    if current_time - ts <= self._tts_buffer_duration
-                ]
                 logger.debug(f"🔊 Tracking TTS text for feedback prevention: '{text}'")
                 
                 # AUDIO FEEDBACK PREVENTION: Pause whisper-stream during TTS playback
@@ -668,14 +676,12 @@ class WhisperCppStreamingSTTService(STTService):
         transcribed_lower = transcribed_text.lower().strip()
         current_time = time.time()
         
-        # Clean old TTS texts
-        self._recent_tts_texts = [
-            (text, ts) for text, ts in self._recent_tts_texts 
-            if current_time - ts <= self._tts_buffer_duration
-        ]
-        
-        # Check similarity with recent TTS texts
-        for tts_text, _ in self._recent_tts_texts:
+        # Check similarity with recent TTS texts (deque handles size limit)
+        for tts_text, ts in self._recent_tts_texts:
+            # Skip old entries
+            if current_time - ts > self._tts_buffer_duration:
+                continue
+                
             similarity = self._calculate_text_similarity(transcribed_lower, tts_text)
             if similarity >= self._similarity_threshold:
                 logger.info(f"🔍 TTS feedback detected (similarity: {similarity:.2f}): '{transcribed_text}' ≈ '{tts_text}'")
@@ -721,6 +727,12 @@ class WhisperCppStreamingSTTService(STTService):
         
         # Mark speech session as ending
         self._speech_session_active = False
+        
+        # Check if we have a pending language switch
+        if self._language_switch_pending and self._language_switch_queue:
+            new_language = self._language_switch_queue.pop(0)
+            logger.info(f"🔄 Processing deferred language switch to: {new_language}")
+            asyncio.create_task(self._restart_with_new_language())
     
     def _should_accept_transcription(self) -> bool:
         """Check if we should accept transcriptions based on VAD state"""
@@ -758,22 +770,39 @@ class WhisperCppStreamingSTTService(STTService):
             logger.error(f"❌ Error resuming whisper-stream: {e}")
             
     async def _restart_with_new_language(self):
-        """Restart the whisper-stream process with updated language settings"""
+        """Smart language switch with minimal disruption"""
         try:
-            logger.info(f"🛑 Stopping current whisper-stream process...")
+            # If we're in the middle of transcription, wait for a good moment
+            if self._user_is_speaking or self._speech_session_active:
+                logger.info("⏳ Deferring language switch until speech session ends")
+                self._language_switch_pending = True
+                self._language_switch_queue.append(self._language)
+                return
+            
+            # For minor language variations (e.g., en-US to en-GB), no restart needed
+            if (self._original_language and self._language and 
+                self._original_language.split('-')[0] == self._language.split('-')[0]):
+                logger.info(f"🔄 Minor language variant change: {self._original_language} -> {self._language}")
+                self._original_language = self._language
+                self._needs_restart = False
+                return
+            
+            logger.info(f"🛑 Stopping current whisper-stream process for language switch...")
             self._stop_streaming_process()
             
-            # Give process time to fully stop
-            await asyncio.sleep(0.5)
+            # Minimal delay for process cleanup
+            await asyncio.sleep(0.2)
             
             logger.info(f"🚀 Starting whisper-stream with language: {self._language}")
             self._start_streaming_process()
             self._needs_restart = False
+            self._language_switch_pending = False
+            self._original_language = self._language
             
-            logger.info("✅ Whisper-stream restarted successfully with new language")
+            logger.info("✅ Language switch completed successfully")
             
         except Exception as e:
-            logger.error(f"❌ Error restarting whisper-stream: {e}")
+            logger.error(f"❌ Error during language switch: {e}")
             self._needs_restart = True  # Mark for retry
 
     def _stop_streaming_process(self):
@@ -1124,12 +1153,25 @@ class WhisperCppStreamingSTTService(STTService):
         
     async def _timeout_checker_loop(self):
         """Periodically check for timeout-based utterance completion and idle process management"""
-        logger.debug("Starting timeout checker loop")
+        logger.debug("Starting timeout checker loop with adaptive intervals")
         
         try:
             while self._is_running:
                 await asyncio.sleep(self._timeout_check_interval)
                 current_time = time.time()
+                
+                # Adaptive interval adjustment based on activity
+                time_since_activity = current_time - self._last_activity_time if self._last_activity_time > 0 else 0
+                
+                if self._user_is_speaking or time_since_activity < 2.0:
+                    # High activity - check frequently
+                    self._timeout_check_interval = self._min_timeout_interval
+                else:
+                    # Low activity - exponential backoff
+                    self._timeout_check_interval = min(
+                        self._timeout_check_interval * self._timeout_backoff_factor,
+                        self._max_timeout_interval
+                    )
                 
                 # Check for timeout-based utterance completion
                 timeout_utterance = self._boundary_detector.check_timeout()
@@ -1148,9 +1190,12 @@ class WhisperCppStreamingSTTService(STTService):
                 # Check for idle timeout to save resources
                 if (self._last_activity_time > 0 and 
                     current_time - self._last_activity_time > self._idle_timeout and
-                    self._whisper_process and self._whisper_process.poll() is None):
+                    self._whisper_process and self._whisper_process.poll() is None and
+                    not self._user_is_speaking and not self._paused_for_tts):
                     logger.info(f"⏰ No activity for {self._idle_timeout}s, stopping whisper-stream to save resources")
                     self._stop_streaming_process()
+                    # Mark as not preloaded so it will restart when needed
+                    self._is_preloaded = False
                     
         except asyncio.CancelledError:
             logger.debug("Timeout checker loop cancelled")
@@ -1237,11 +1282,11 @@ class WhisperCppStreamingSTTService(STTService):
             except asyncio.CancelledError:
                 pass
         
-        # Join reader threads
-        if hasattr(self, '_stdout_reader_thread') and self._stdout_reader_thread:
-            self._stdout_reader_thread.join(timeout=1.0)
-        if hasattr(self, '_stderr_reader_thread') and self._stderr_reader_thread:
-            self._stderr_reader_thread.join(timeout=1.0)
+        # Shutdown thread pool gracefully
+        if self._thread_pool:
+            logger.debug("Shutting down thread pool...")
+            self._thread_pool.shutdown(wait=True, timeout=2.0)
+            self._thread_pool = None
         
         # Force cleanup if process still exists
         if self._whisper_process:
