@@ -30,6 +30,7 @@ class OLLamaLLMService(LLMService):
         max_tokens: int = 1000,
         top_p: float = 0.9,
         top_k: int = 40,
+        repetition_penalty: float = 1.1,
         event_emitter = None,
         **kwargs
     ):
@@ -41,6 +42,7 @@ class OLLamaLLMService(LLMService):
         self._max_tokens = max_tokens
         self._top_p = top_p
         self._top_k = top_k
+        self._repetition_penalty = repetition_penalty
         self._event_emitter = event_emitter
         
         # Optimized HTTP client with minimal pooling for better performance
@@ -130,6 +132,7 @@ class OLLamaLLMService(LLMService):
                     "temperature": self._temperature,
                     "top_p": self._top_p,
                     "top_k": self._top_k,
+                    "repetition_penalty": self._repetition_penalty,
                     "num_predict": self._max_tokens,
                     "num_ctx": 2048,  # Optimal context size for performance
                     "num_batch": 1024,  # Match context for optimal batching
