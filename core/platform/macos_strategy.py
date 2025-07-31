@@ -340,11 +340,12 @@ class MacOSPlatformStrategy(PlatformStrategy):
                     lang_enum = lang_mapping.get(language.lower(), Language.EN)  # Default to English
                     logger.info(f"🌍 Using language: {language} -> {lang_enum}")
                 
-                return MLXWhisperPreloadSTTService(
+                self._stt_service = MLXWhisperPreloadSTTService(
                     model=model,
                     language=lang_enum,
                     no_speech_prob=getattr(stt_config, 'no_speech_prob', 0.6)
                 )
+                return self._stt_service
             except ImportError:
                 logger.warning("MLX Whisper not available, falling back to WhisperCpp")
                 service_type = 'whispercpp'
@@ -362,7 +363,7 @@ class MacOSPlatformStrategy(PlatformStrategy):
             whispercpp_model = whispercpp_model_mapping.get(model_size, model_size)
             logger.info(f"Creating WhisperCpp Streaming STT with model: {whispercpp_model}")
             
-            return WhisperCppStreamingSTTService(
+            self._stt_service = WhisperCppStreamingSTTService(
                 model_size=whispercpp_model,
                 language=language,
                 translate=getattr(stt_config, 'translate', False),
@@ -377,6 +378,7 @@ class MacOSPlatformStrategy(PlatformStrategy):
                 threads=getattr(stt_config, 'threads', 6),
                 event_emitter=event_emitter
             )
+            return self._stt_service
         
         # Default: WhisperCpp (still fast, but not as optimized as MLX)
         # Map unsupported models to WhisperCpp equivalents
@@ -390,7 +392,7 @@ class MacOSPlatformStrategy(PlatformStrategy):
         whispercpp_model = whispercpp_model_mapping.get(model_size, model_size)
         logger.info(f"Creating WhisperCpp STT with model: {whispercpp_model}")
         
-        return WhisperCppSTTService(
+        self._stt_service = WhisperCppSTTService(
             model_size=whispercpp_model,
             language=language,
             translate=getattr(stt_config, 'translate', False),
@@ -399,6 +401,7 @@ class MacOSPlatformStrategy(PlatformStrategy):
             sample_rate=getattr(stt_config, 'sample_rate', 16000),
             event_emitter=event_emitter
         )
+        return self._stt_service
     
     async def create_llm_service(self, event_emitter=None):
         """Create native Ollama LLM service"""
@@ -545,9 +548,37 @@ class MacOSPlatformStrategy(PlatformStrategy):
     
     async def cleanup(self):
         """Clean up macOS native services"""
-        # Native services typically don't need explicit cleanup
+        logger.info("🧹 Cleaning up macOS native services...")
+        
+        # Clean up STT service if it exists
+        if hasattr(self, '_stt_service') and self._stt_service:
+            try:
+                if hasattr(self._stt_service, 'cleanup'):
+                    await self._stt_service.cleanup()
+                logger.info("✅ STT service cleaned up")
+            except Exception as e:
+                logger.error(f"❌ Error cleaning up STT service: {e}")
+        
+        # Clean up TTS service if it exists
+        if hasattr(self, '_tts_service') and self._tts_service:
+            try:
+                if hasattr(self._tts_service, 'cleanup'):
+                    await self._tts_service.cleanup()
+                logger.info("✅ TTS service cleaned up")
+            except Exception as e:
+                logger.error(f"❌ Error cleaning up TTS service: {e}")
+        
+        # Clean up LLM service if it exists
+        if hasattr(self, '_llm_service') and self._llm_service:
+            try:
+                if hasattr(self._llm_service, 'cleanup'):
+                    await self._llm_service.cleanup()
+                logger.info("✅ LLM service cleaned up")
+            except Exception as e:
+                logger.error(f"❌ Error cleaning up LLM service: {e}")
+        
         # Ollama can keep running in background
-        logger.info("macOS native services cleanup complete")
+        logger.info("✅ macOS native services cleanup complete")
     
     def get_health_info(self) -> Dict[str, Any]:
         """Get macOS-specific health information"""

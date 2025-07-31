@@ -82,6 +82,17 @@ class MaestroCatSignalHandler:
                 self._loop.call_soon_threadsafe(
                     lambda: asyncio.create_task(self._async_cleanup())
                 )
+                
+                # Start a watchdog thread that will force exit after timeout
+                def force_exit_watchdog():
+                    time.sleep(30)  # 30 second total timeout
+                    if not self._cleanup_complete:
+                        logger.error("⏰ Cleanup timeout exceeded, forcing exit...")
+                        os._exit(1)
+                
+                watchdog = threading.Thread(target=force_exit_watchdog, daemon=True)
+                watchdog.start()
+                
             except Exception as e:
                 logger.error(f"❌ Error scheduling async cleanup: {e}")
                 threading.Thread(target=self._sync_cleanup, daemon=True).start()
@@ -122,6 +133,10 @@ class MaestroCatSignalHandler:
             except Exception as e:
                 logger.error(f"❌ Error during async cleanup: {e}")
             finally:
+                # Stop the event loop to ensure all tasks are cancelled
+                if self._loop and self._loop.is_running():
+                    self._loop.stop()
+                
                 # Ensure we exit even if cleanup had errors
                 os._exit(0)
                 

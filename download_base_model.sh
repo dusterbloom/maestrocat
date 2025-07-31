@@ -7,10 +7,10 @@ echo "🚀 Downloading Whisper base model for optimized streaming..."
 mkdir -p ./mlx_models
 
 # Download base model (142MB) - much smaller than medium (1.4GB)
-if [ ! -f "./mlx_models/ggml-base.bin" ]; then
-    echo "📥 Downloading ggml-base.bin..."
-    curl -L "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin" \
-         -o "./mlx_models/ggml-base.bin" \
+if [ ! -f "./mlx_models/ggml-base-q5_1.bin" ]; then
+    echo "📥 Downloading ggml-base-q5_1.bin..."
+    curl -L "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_1.bin" \
+         -o "./mlx_models/ggml-base-q5_1.bin" \
          --progress-bar
     echo "✅ Base model downloaded successfully!"
 else

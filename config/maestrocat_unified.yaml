@@ -113,7 +113,7 @@ platforms:
   macos_native:
     stt:
       service: "whispercpp_streaming"    # MLX Whisper for Apple Silicon optimization
-      model_size: "medium"                # Small model for good accuracy
+      model_size: "base"                # Small model for good accuracy
       sample_rate: 16000
       channels: 1                        # Mono audio
       block_size: 512                    # Audio chunk size (512 = responsive)

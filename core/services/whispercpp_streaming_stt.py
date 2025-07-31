@@ -155,49 +155,14 @@ class UtteranceBoundaryDetector:
         return None
         
     def _merge_segments(self, segments: List[TranscriptionSegment]) -> str:
-        """Merge segments into a single utterance, handling overlaps"""
+        """Merges a list of segments into a single utterance string by joining them."""
         if not segments:
             return ""
-            
-        if len(segments) == 1:
-            return segments[0].text
-            
-        # Merge segments with overlap detection
-        merged_parts = []
-        
-        for i, segment in enumerate(segments):
-            text = segment.text.strip()
-            if not text:
-                continue
-                
-            if i == 0:
-                merged_parts.append(text)
-            else:
-                # Check for overlap with previous segments
-                prev_text = " ".join(merged_parts)
-                
-                # Simple overlap detection - if current segment starts with end of previous
-                words_current = text.split()
-                words_prev = prev_text.split()
-                
-                # Find overlap
-                max_overlap = min(len(words_current), len(words_prev), 3)  # Check up to 3 words
-                overlap_found = False
-                
-                for overlap_len in range(max_overlap, 0, -1):
-                    if words_prev[-overlap_len:] == words_current[:overlap_len]:
-                        # Overlap found - merge without duplication
-                        remaining_words = words_current[overlap_len:]
-                        if remaining_words:
-                            merged_parts.extend(remaining_words)
-                        overlap_found = True
-                        break
-                        
-                if not overlap_found:
-                    # No overlap - just append
-                    merged_parts.extend(words_current)
-                    
-        return " ".join(merged_parts)
+        # A simple join is more robust than complex overlap logic.
+        # The stream tool often refines the transcript, and the sequence of segments
+        # represents the evolution of the transcription. Joining them is a safe
+        # and effective way to form the complete utterance.
+        return " ".join(segment.text.strip() for segment in segments if segment.text.strip())
 
 
 class WhisperCppStreamingSTTService(STTService):
@@ -219,9 +184,9 @@ class WhisperCppStreamingSTTService(STTService):
         channels: int = 1,
         block_size: int = 512,
         max_latency_ms: int = 200,
-        step_ms: int = 2500,  # Increased from 1000ms - process less frequently
-        length_ms: int = 3000,  # Reduced from 5000ms - smaller context window
-        keep_ms: int = 100,  # Reduced from 500ms - minimal context retention
+        step_ms: int = 500,  # Reduced from 2500ms for lower latency
+        length_ms: int = 10000,  # Increased from 3000ms for more context
+        keep_ms: int = 2000,  # Increased from 100ms for better context retention
         voice_threshold: float = 0.8,
         threads: int = 3,  # Reduced from 6 - better thermal management on MacBook
         event_emitter=None,
@@ -374,45 +339,47 @@ class WhisperCppStreamingSTTService(STTService):
         return None
         
     def _ensure_model(self):
-        """Ensure the Whisper model is available"""
+        """Ensure the Whisper model is available, prioritizing quantized models."""
         if self._model_path and os.path.exists(self._model_path):
             return
-            
-        # Search for model in common locations
-        # For streaming, prefer smaller models for better thermal performance
-        if self._model_size == "base" or self._model_size == "small":
-            model_file = f"ggml-{self._model_size}.bin"
-        else:
-            # Force smaller model for streaming to prevent overheating
-            logger.warning(f"⚠️  Model size '{self._model_size}' too large for streaming, using 'base' instead")
+
+        # Prioritized list of quantization suffixes from most to least preferred
+        quantization_suffixes = [
+            "-q5_1", "-q5_0", "-q8_0", "-q4_1", "-q4_0", ""  # "" for the unquantized model
+        ]
+
+        # For streaming, prefer smaller models
+        if self._model_size not in ["tiny", "base", "small"]:
+            logger.warning(f"⚠️  Model size '{self._model_size}' may be too large for streaming, using 'base' instead")
             self._model_size = "base"
-            model_file = "ggml-base.bin"
-            
+
         search_dirs = [
             "./mlx_models",
-            "./models", 
+            "./models",
             "./whisper.cpp/models",
             os.path.expanduser("~/.cache/whisper"),
             os.path.expanduser("~/models"),
         ]
-        
-        for models_dir in search_dirs:
-            if os.path.exists(models_dir):
+
+        for suffix in quantization_suffixes:
+            model_file = f"ggml-{self._model_size}{suffix}.bin"
+            for models_dir in search_dirs:
                 model_path = os.path.join(models_dir, model_file)
                 if os.path.exists(model_path):
                     self._model_path = model_path
-                    logger.info(f"Found model at: {self._model_path}")
+                    logger.info(f"✅ Found optimal model: {self._model_path}")
                     return
-        
-        # Fallback to default cache directory
+
+        # Fallback to a default path if no model is found
+        default_model_file = f"ggml-{self._model_size}.bin"
         default_dir = os.path.expanduser("~/.cache/whisper")
         os.makedirs(default_dir, exist_ok=True)
-        self._model_path = os.path.join(default_dir, model_file)
-        
+        self._model_path = os.path.join(default_dir, default_model_file)
+
         logger.warning(
-            f"Model file not found. Searched in: {search_dirs}. "
+            f"Could not find an optimal model in {search_dirs}. "
             f"Using fallback path: {self._model_path}. "
-            f"Please download the model manually or use whisper.cpp's download script."
+            f"For best performance, download a quantized model (e.g., ggml-base-q5_1.bin)."
         )
             
     async def _preload_model(self):
@@ -1238,6 +1205,41 @@ class WhisperCppStreamingSTTService(STTService):
                 pass
         
         await super().stop(frame)
+    
+    async def cleanup(self):
+        """Clean up resources when service is being destroyed"""
+        logger.info("🧹 Cleaning up WhisperCppStreamingSTTService...")
+        
+        # Set running flag to false
+        self._is_running = False
+        
+        # Stop the whisper process
+        self._stop_streaming_process()
+        
+        # Cancel timeout checker task
+        if self._timeout_checker_task:
+            self._timeout_checker_task.cancel()
+            try:
+                await self._timeout_checker_task
+            except asyncio.CancelledError:
+                pass
+        
+        # Join reader threads
+        if hasattr(self, '_stdout_reader_thread') and self._stdout_reader_thread:
+            self._stdout_reader_thread.join(timeout=1.0)
+        if hasattr(self, '_stderr_reader_thread') and self._stderr_reader_thread:
+            self._stderr_reader_thread.join(timeout=1.0)
+        
+        # Force cleanup if process still exists
+        if self._whisper_process:
+            try:
+                self._whisper_process.kill()
+                self._whisper_process.wait(timeout=1.0)
+            except:
+                pass
+            self._whisper_process = None
+        
+        logger.info("✅ WhisperCppStreamingSTTService cleanup complete")
         
     def write_audio(self, audio: bytes):
         """Note: whisper-stream captures audio directly via SDL2, so this is a no-op"""

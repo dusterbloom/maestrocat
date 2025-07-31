@@ -98,6 +98,10 @@ class MaestroCatAgent:
         # State tracking
         self._setup_complete = False
         self._services_ready = False
+        
+        # Servers for graceful shutdown
+        self._websocket_server = None
+        self._active_websockets = set()
     
     @property
     def platform_info(self):
@@ -309,6 +313,9 @@ class MaestroCatAgent:
         """Handle WebSocket connection"""
         await websocket.accept()
         
+        # Track active WebSocket connection
+        self._active_websockets.add(websocket)
+        
         pipeline, transport = await self.create_pipeline(websocket)
         
         # Create pipeline task with platform-appropriate parameters
@@ -330,9 +337,18 @@ class MaestroCatAgent:
         
         try:
             await runner.run(task)
+        except asyncio.CancelledError:
+            logger.info(f"WebSocket task cancelled for: {websocket.client}")
+            raise
         except Exception as e:
             logger.error(f"Pipeline error: {e}")
         finally:
+            # Remove from active connections
+            self._active_websockets.discard(websocket)
+            try:
+                await websocket.close()
+            except Exception:
+                pass
             logger.info(f"WebSocket disconnected: {websocket.client}")
     
     def create_app(self) -> FastAPI:
@@ -423,20 +439,28 @@ class MaestroCatAgent:
         # Log startup information
         self._log_startup_info(websocket_port, debug_port)
         
-        # Configure WebSocket server
+        # Configure WebSocket server with signal handling disabled
+        # We handle signals ourselves for better control
         websocket_config = uvicorn.Config(
             app, 
             host=host, 
             port=websocket_port, 
-            log_level="info"
+            log_level="info",
+            # Disable Uvicorn's signal handlers
+            use_colors=True,
+            server_header=False,
+            access_log=False  # We do our own logging
         )
-        websocket_server = uvicorn.Server(websocket_config)
+        self._websocket_server = uvicorn.Server(websocket_config)
+        
+        # Override Uvicorn's signal handling
+        self._websocket_server.handle_exit = False
         
         # Run both servers with proper shutdown handling
         try:
             # Create tasks for both servers
             debug_task = asyncio.create_task(self.debug_ui.start())
-            websocket_task = asyncio.create_task(websocket_server.serve())
+            websocket_task = asyncio.create_task(self._websocket_server.serve())
             
             # Wait for any task to complete or fail
             done, pending = await asyncio.wait(
@@ -498,6 +522,27 @@ class MaestroCatAgent:
         logger.info("Cleaning up MaestroCat Agent...")
         
         try:
+            # Close all active WebSocket connections
+            if self._active_websockets:
+                logger.info(f"Closing {len(self._active_websockets)} active WebSocket connections...")
+                close_tasks = []
+                for ws in list(self._active_websockets):
+                    try:
+                        close_tasks.append(ws.close(code=1001, reason="Server shutting down"))
+                    except Exception:
+                        pass
+                
+                if close_tasks:
+                    await asyncio.gather(*close_tasks, return_exceptions=True)
+                self._active_websockets.clear()
+            
+            # Shutdown Uvicorn server gracefully
+            if self._websocket_server:
+                logger.info("Shutting down WebSocket server...")
+                self._websocket_server.should_exit = True
+                # Give it a moment to close connections
+                await asyncio.sleep(0.1)
+            
             # Clean up platform-specific resources
             await self.strategy.cleanup()
             

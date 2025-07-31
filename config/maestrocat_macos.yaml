@@ -18,7 +18,7 @@ stt:
   vad_threshold: 0.5      # VAD sensitivity
   
   # Streaming STT specific settings (optimized for thermal management)
-  model_path: "./mlx_models/ggml-base.bin"  # Smaller model to prevent overheating
+  model_path: "./mlx_models/ggml-base-q5_1.bin"  # Smaller model to prevent overheating
   block_size: 512        # Audio block size for streaming
   threads: 3             # Reduced thread count for better thermal management
   step_ms: 2500          # Process less frequently to reduce CPU load

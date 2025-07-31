@@ -401,11 +401,30 @@ Configuration:
     
     # Run the launcher with signal handling
     try:
+        # Get the signal handler instance
+        signal_handler = get_signal_handler()
+        
+        # Create event loop
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        # Register the loop with signal handler
+        signal_handler.register_loop(loop)
+        
         # Set up signal handlers
         setup_signal_handlers()
         
         # Run the main async function
-        exit_code = asyncio.run(run())
+        try:
+            exit_code = loop.run_until_complete(run())
+        finally:
+            # Ensure loop cleanup
+            pending = asyncio.all_tasks(loop)
+            for task in pending:
+                task.cancel()
+            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            loop.close()
+        
         sys.exit(exit_code)
         
     except KeyboardInterrupt:
