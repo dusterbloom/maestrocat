@@ -1285,7 +1285,8 @@ class WhisperCppStreamingSTTService(STTService):
         # Shutdown thread pool gracefully
         if self._thread_pool:
             logger.debug("Shutting down thread pool...")
-            self._thread_pool.shutdown(wait=True, timeout=2.0)
+            # Python 3.13 doesn't support timeout parameter in shutdown
+            self._thread_pool.shutdown(wait=True)
             self._thread_pool = None
         
         # Force cleanup if process still exists

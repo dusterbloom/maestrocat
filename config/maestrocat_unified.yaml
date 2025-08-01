@@ -48,8 +48,8 @@ stt:
 # Base LLM configuration  
 llm:
   model: "llama3.2:3b"
-  temperature: 0.7
-  max_tokens: 400
+  temperature: 0.3
+  max_tokens: 100
   top_p: 0.9
   top_k: 40
 
@@ -90,27 +90,21 @@ modules:
       use_gpu: false  # Disable GPU for CPU optimization on macOS
   memory:
     enabled: true
-    type: "amem"  # Options: "sqlite", "amem"
-    database_path: "data/memory/conversations.db"
-    max_history: 1000
-    enable_search: true
-    context_window_minutes: 30
-    context_injection:
-      enabled: true
-      max_messages: 5
-      time_window_minutes: 5
-    cleanup:
-      enabled: true
-      retention_days: 30
-      cleanup_interval_hours: 24
+    type: amem  # Use Agentic Memory
+    max_history: 100
   amem:
     enabled: true
     chroma_path: "data/memory/amem_db"
     collection_name: "a-mem-collection"
+    sqlite_path: "data/memory/amem_conversations.db"
     amem_llm:
-      model: "llama3.2:3b"
+      model: "gemma3:1b"  # Ultra-fast for JSON extraction
       base_url: "http://localhost:11434"
       temperature: 0.0
+    tier1_enabled: true  # SQLite for fast keyword search
+    tier2_enabled: true  # ChromaDB for semantic search
+    tier3_enabled: true  # Memory cache
+    cache_size: 100
 
 # Development settings (universal)
 development:

@@ -31,12 +31,12 @@ stt:
 llm:
   base_url: "http://localhost:11434"  # Local Ollama service (install with 'brew install ollama')
   model: "llama3.2:3b"               # Fastest model for sub-second response
-  temperature: 0.7
+  temperature: 0.3
   repetition_penalty: 1.1  # Discourage the model from repeating itself
-  max_tokens: 150                    # Reduced for faster generation
+  max_tokens: 100                     # Very short responses only
   top_p: 0.9
   top_k: 40
-  system_prompt: "You are MaestroCat, a helpful AI voice assistant. Keep responses very brief and conversational. If interrupted, acknowledge it naturally."
+  system_prompt: "You are MaestroCat. Be extremely concise - respond in 1-2 short sentences max. Never explain context or say 'based on our previous conversations'. Just answer directly. If asked about something you know from context, state it as fact without explanation."
 
 # Native Kokoro ONNX TTS - preferred for streaming with Apple Silicon acceleration
 tts:
@@ -94,8 +94,22 @@ modules:
       queue_size: 100  # Max audio chunks in processing queue
       use_gpu: false  # Use Metal acceleration on macOS instead
   memory:
-    enabled: false
+    enabled: true
+    type: amem  # Use Agentic Memory
     max_history: 100
+  amem:
+    enabled: true
+    chroma_path: "data/memory/amem_db"
+    collection_name: "a-mem-collection"
+    sqlite_path: "data/memory/amem_conversations.db"
+    amem_llm:
+      model: "gemma3:1b"  # Better at structured outputs than tinyllama
+      base_url: "http://localhost:11434"
+      temperature: 0.0
+    tier1_enabled: true  # SQLite for fast keyword search
+    tier2_enabled: true  # ChromaDB for semantic search
+    tier3_enabled: true  # Memory cache
+    cache_size: 100
 
 # macOS-specific settings
 macos:

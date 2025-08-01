@@ -82,6 +82,31 @@ class ModuleLoader(FrameProcessor):
         except Exception as e:
             logger.error(f"Failed to load module {module_name}: {e}")
             raise
+    
+    def register_module(self, module: MaestroCatModule):
+        """Register an already initialized module"""
+        module_name = module.name
+        
+        # Store module
+        self.modules[module_name] = module
+        
+        # Subscribe to events if event emitter provided and module has on_event
+        if self.event_emitter and hasattr(module, 'on_event'):
+            # Create a wrapper that always passes event_type and data separately
+            async def module_event_wrapper(event):
+                event_type = event.get("type", "")
+                data = event.get("data", {})
+                await module.on_event(event_type, data)
+            
+            # Store wrapper for cleanup
+            self._event_wrappers[module_name] = module_event_wrapper
+            self.event_emitter.subscribe("*", module_event_wrapper)
+        
+        # Pass event emitter reference if module doesn't have it
+        if self.event_emitter and hasattr(module, 'event_emitter') and not module.event_emitter:
+            module.event_emitter = self.event_emitter
+            
+        logger.info(f"Registered module: {module_name}")
             
     async def unload_module(self, module_name: str):
         """Unload a module"""

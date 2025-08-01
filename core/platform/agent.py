@@ -36,6 +36,7 @@ from ..processors.metrics_processor import MetricsProcessor
 # Removed complex metrics aggregator for now
 from .config import UnifiedMaestroCatConfig
 from ..modules import VoiceRecognitionModule, LightweightVoiceRecognition, AutoEnrollVoiceRecognition, MemoryModule, AMemModule
+from ..processors.amem_context_injector import AMemContextInjector
 from ..apps.debug_ui import DebugUIServer
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,7 @@ class MaestroCatAgent:
         self.speaker_name_manager = None
         self.vad_event_bridge = None
         self.amem_module = None
+        self.amem_context_injector = None
         
         # Services (created by strategy)
         self.stt = None
@@ -299,6 +301,16 @@ class MaestroCatAgent:
                 if self.debug_ui:
                     self.debug_ui.amem_module = self.amem_module
                 logger.info("✅ A-Mem module loaded")
+                
+                # Set up event handler for voice recognition
+                if self.event_emitter:
+                    async def on_speaker_identified(event_type: str, data: Any):
+                        if event_type == "speaker_identified" and hasattr(self, 'amem_context_injector'):
+                            speaker_id = data.get("speaker_id", "default")
+                            logger.info(f"Setting A-Mem session ID to speaker: {speaker_id}")
+                            self.amem_context_injector.set_session_id(speaker_id)
+                    
+                    self.event_emitter.subscribe("speaker_identified", on_speaker_identified)
             elif memory_type == "sqlite":
                 await self.module_loader.load_module(
                     MemoryModule,
@@ -388,7 +400,11 @@ class MaestroCatAgent:
             context_aggregator.user(),
         ])
         
-        # Memory is handled via events in the MemoryModule, not as a processor
+        # Add AMemContextInjector if using amem - AFTER context aggregator but BEFORE LLM
+        if self.amem_module:
+            self.amem_context_injector = AMemContextInjector(self.amem_module)
+            pipeline_components.append(self.amem_context_injector)
+            logger.info("Added AMemContextInjector to pipeline for tiered memory search")
         
         # Continue with LLM and TTS
         pipeline_components.extend([

@@ -11,7 +11,7 @@ import logging
 import os
 import subprocess
 import sys
-from typing import Optional
+from typing import Optional, Any
 
 # FastAPI imports
 from fastapi import FastAPI, WebSocket
@@ -47,6 +47,8 @@ from core.services.whispercpp_stt import WhisperCppSTTService
 from core.services.macos_tts import MacOSTTSService, MacOSPyTTSx3Service
 from core.utils import MaestroCatConfig
 from core.modules import VoiceRecognitionModule, MemoryModule
+from core.modules.amem import AMemModule
+from core.processors.amem_context_injector import AMemContextInjector
 from core.apps.debug_ui import DebugUIServer
 from core.serializers import RawAudioSerializer
 
@@ -74,6 +76,10 @@ class MacOSMaestroCatAgent:
         self.tts = None
         self.interruption_handler = None
         self.transcription_events = None
+        
+        # Modules
+        self.amem_module = None
+        self.amem_injector = None
         
     async def setup(self):
         """Set up the voice agent pipeline"""
@@ -234,10 +240,31 @@ class MacOSMaestroCatAgent:
             
         # Load memory module
         if self.config.modules.get("memory", {}).get("enabled", False):
-            await self.module_loader.load_module(
-                MemoryModule,
-                self.config.modules["memory"]
-            )
+            # Check if using amem type
+            if self.config.modules["memory"].get("type") == "amem":
+                # Load AMemModule instead
+                amem_config = self.config.modules.get("amem", {})
+                amem_config["name"] = "amem"  # Add name for module initialization
+                self.amem_module = AMemModule("amem", amem_config)
+                await self.amem_module.initialize()
+                self.module_loader.register_module(self.amem_module)
+                logger.info("Loaded AMemModule for tiered memory system")
+                
+                # Set up event handler for voice recognition
+                if self.event_emitter:
+                    async def on_speaker_identified(event_type: str, data: Any):
+                        if event_type == "speaker_identified" and self.amem_injector:
+                            speaker_id = data.get("speaker_id", "default")
+                            logger.info(f"Setting A-Mem session ID to speaker: {speaker_id}")
+                            self.amem_injector.set_session_id(speaker_id)
+                    
+                    self.event_emitter.on("speaker_identified", on_speaker_identified)
+            else:
+                # Load standard memory module
+                await self.module_loader.load_module(
+                    MemoryModule,
+                    self.config.modules["memory"]
+                )
             
     async def create_pipeline(self, websocket: WebSocket):
         """Create pipeline for WebSocket connection"""
@@ -258,19 +285,34 @@ class MacOSMaestroCatAgent:
         context_aggregator = self.llm.create_context_aggregator(context)
         
         # Build the pipeline with proper context management
-        pipeline = Pipeline([
+        pipeline_components = [
             # Input
             transport.input(),
             
             # STT
             self.stt,
             
+            # Transcription events for debug UI
+            self.transcription_events,
+            
             # Metrics collection (track performance across all components)
             self.metrics_collector,
-            
+        ]
+        
+        # Continue with rest of pipeline
+        pipeline_components.extend([
             # User context aggregation (TranscriptionFrame → LLM trigger)
             context_aggregator.user(),
-            
+        ])
+        
+        # Add AMemContextInjector if using amem - AFTER context aggregator but BEFORE LLM
+        if self.amem_module:
+            self.amem_injector = AMemContextInjector(self.amem_module)
+            pipeline_components.append(self.amem_injector)
+            logger.info("Added AMemContextInjector to pipeline for tiered memory search")
+        
+        # Continue with LLM and rest of pipeline
+        pipeline_components.extend([
             # LLM
             self.llm,
             
@@ -283,6 +325,9 @@ class MacOSMaestroCatAgent:
             # Assistant context aggregation (LLM response handling)
             context_aggregator.assistant(),
         ])
+        
+        # Build the pipeline
+        pipeline = Pipeline(pipeline_components)
         
         return pipeline, transport
     
