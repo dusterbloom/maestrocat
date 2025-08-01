@@ -14,10 +14,11 @@ pyaudio>=0.2.11  # For WhisperLive
 prometheus-client>=0.18.0  # For metrics
 psutil>=5.9.0  # For system monitoring
 
+# A-Mem dependencies
+chromadb>=0.4.22 # For agentic memory
+
 # Voice recognition (optional)
-speechbrain>=0.5.16  # For speaker recognition
-pyannote.audio>=3.1.0  # Alternative speaker recognition
-torch>=2.0.0  # Required by speechbrain/pyannote
+resemblyzer=0.1.4
 
 # macOS Apple Silicon optimizations
 lightning-whisper-mlx

@@ -9,29 +9,10 @@ from abc import ABC, abstractmethod
 from pipecat.frames.frames import Frame, SystemFrame, TextFrame
 from pipecat.processors.frame_processor import FrameProcessor, FrameDirection
 
+from ..modules.base import MaestroCatModule
+
 logger = logging.getLogger(__name__)
 
-
-class MaestroCatModule(ABC):
-    """Base class for MaestroCat modules"""
-    
-    def __init__(self, name: str, config: Dict[str, Any]):
-        self.name = name
-        self.config = config
-        self.enabled = True
-        
-    @abstractmethod
-    async def on_event(self, event_type: str, data: Any):
-        """Handle events from the pipeline"""
-        pass
-        
-    async def initialize(self):
-        """Initialize the module"""
-        pass
-        
-    async def cleanup(self):
-        """Cleanup when module is unloaded"""
-        pass
         
 
 class ModuleLoader(FrameProcessor):

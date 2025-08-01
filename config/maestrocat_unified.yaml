@@ -9,7 +9,7 @@ language_config:
   en:
     voice: "af_bella"
     stt_language: "en"
-    system_prompt: "You are MaestroCat, a helpful AI voice assistant. Keep responses brief and conversational for real-time voice interaction. If interrupted, acknowledge it naturally and continue. When you hear a new voice (someone you haven't met before), immediately ask 'What's your name?' to personalize future conversations. When you receive a [System: Recognized returning user - NAME is back] message, greet them warmly by name."
+    system_prompt: "You are MaestroCat, a helpful AI voice assistant with a memory tool. When the user asks a question, first decide if you need to consult your memory. Your memory contains past conversations and user preferences. If you need to use your memory, formulate a search query. Otherwise, answer directly. When you see a [Recalled Memory Context] block, use that information to inform your response."
   it:
     voice: "if_sara"
     stt_language: "it"
@@ -90,21 +90,27 @@ modules:
       use_gpu: false  # Disable GPU for CPU optimization on macOS
   memory:
     enabled: true
-    type: "sqlite"  # Using SQLite for persistent storage
+    type: "amem"  # Options: "sqlite", "amem"
     database_path: "data/memory/conversations.db"
-    max_history: 1000  # Maximum messages to keep per session
-    enable_search: true  # Enable conversation search
-    context_window_minutes: 30  # Time window for context retrieval
-    # Context injection settings for LLM
+    max_history: 1000
+    enable_search: true
+    context_window_minutes: 30
     context_injection:
       enabled: true
-      max_messages: 5  # Number of recent messages to inject
-      time_window_minutes: 5  # Recent context time window
-    # Database maintenance
+      max_messages: 5
+      time_window_minutes: 5
     cleanup:
       enabled: true
-      retention_days: 30  # Keep conversations for 30 days
-      cleanup_interval_hours: 24  # Run cleanup daily
+      retention_days: 30
+      cleanup_interval_hours: 24
+  amem:
+    enabled: true
+    chroma_path: "data/memory/amem_db"
+    collection_name: "a-mem-collection"
+    amem_llm:
+      model: "llama3.2:3b"
+      base_url: "http://localhost:11434"
+      temperature: 0.0
 
 # Development settings (universal)
 development:

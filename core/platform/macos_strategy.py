@@ -403,7 +403,7 @@ class MacOSPlatformStrategy(PlatformStrategy):
         )
         return self._stt_service
     
-    async def create_llm_service(self, event_emitter=None):
+    async def create_llm_service(self, event_emitter=None, amem_module=None):
         """Create native Ollama LLM service"""
         llm_config = self.config.llm
         
@@ -416,7 +416,8 @@ class MacOSPlatformStrategy(PlatformStrategy):
             max_tokens=getattr(llm_config, 'max_tokens', 150),
             top_p=getattr(llm_config, 'top_p', 0.9),
             top_k=getattr(llm_config, 'top_k', 40),
-            event_emitter=event_emitter
+            event_emitter=event_emitter,
+            amem_module=amem_module
         )
     
     async def create_tts_service(self, event_emitter=None):

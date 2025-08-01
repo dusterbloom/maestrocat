@@ -120,7 +120,7 @@ class PlatformStrategy(ABC):
         pass
     
     @abstractmethod
-    async def create_llm_service(self, event_emitter=None):
+    async def create_llm_service(self, event_emitter=None, amem_module=None):
         """Create and configure the LLM service for this platform"""
         pass
     

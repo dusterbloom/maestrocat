@@ -11,7 +11,7 @@ from datetime import datetime
 import pickle
 import os
 
-from ..processors.module_loader import MaestroCatModule
+from .base import MaestroCatModule
 
 logger = logging.getLogger(__name__)
 

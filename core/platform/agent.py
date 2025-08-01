@@ -35,10 +35,11 @@ from ..processors.language_handler import LanguageHandler
 from ..processors.metrics_processor import MetricsProcessor
 # Removed complex metrics aggregator for now
 from .config import UnifiedMaestroCatConfig
-from ..modules import VoiceRecognitionModule, LightweightVoiceRecognition, AutoEnrollVoiceRecognition, MemoryModule
+from ..modules import VoiceRecognitionModule, LightweightVoiceRecognition, AutoEnrollVoiceRecognition, MemoryModule, AMemModule
 from ..apps.debug_ui import DebugUIServer
 
 logger = logging.getLogger(__name__)
+
 
 
 class MaestroCatAgent:
@@ -94,6 +95,7 @@ class MaestroCatAgent:
         self.speaker_context = None
         self.speaker_name_manager = None
         self.vad_event_bridge = None
+        self.amem_module = None
         
         # Services (created by strategy)
         self.stt = None
@@ -246,7 +248,7 @@ class MaestroCatAgent:
         
         # Create services through platform strategy
         self.stt = await self.strategy.create_stt_service(self.event_emitter)
-        self.llm = await self.strategy.create_llm_service(self.event_emitter)
+        self.llm = await self.strategy.create_llm_service(self.event_emitter, self.amem_module)
         self.tts = await self.strategy.create_tts_service(self.event_emitter)
         
         logger.info(f"✅ STT: {type(self.stt).__name__}")
@@ -270,34 +272,41 @@ class MaestroCatAgent:
     async def _load_modules(self):
         """Load configured modules"""
         logger.info(f"Loading modules with config: {self.config.modules}")
-        
+
         # Load voice recognition module
         voice_config = self.config.modules.get("voice_recognition", {})
         logger.info(f"Voice recognition config: {voice_config}")
-        
+
         if voice_config.get("enabled", False):
-            # Use auto-enrolling version for magical experience
             self.voice_recognition_module = await self.module_loader.load_module(
                 AutoEnrollVoiceRecognition,
                 self.config.modules["voice_recognition"]
             )
-            
-            # Register it with the audio tee processor
             if self.voice_recognition_module and self.audio_tee:
-                # Register the module's process_audio method as a consumer
                 self.audio_tee.register_audio_consumer(
                     self.voice_recognition_module.process_audio
                 )
-            
             logger.info("✅ Voice recognition module loaded and connected")
-        
-        # Load memory module
-        if self.config.modules.get("memory", {}).get("enabled", False):
-            await self.module_loader.load_module(
-                MemoryModule,
-                self.config.modules["memory"]
-            )
-            logger.info("✅ Memory module loaded")
+
+        memory_config = self.config.modules.get("memory", {})
+        if memory_config.get("enabled", False):
+            memory_type = memory_config.get("type", "sqlite")
+            if memory_type == "amem":
+                self.amem_module = await self.module_loader.load_module(
+                    AMemModule,
+                    self.config.modules.get("amem", {})
+                )
+                if self.debug_ui:
+                    self.debug_ui.amem_module = self.amem_module
+                logger.info("✅ A-Mem module loaded")
+            elif memory_type == "sqlite":
+                await self.module_loader.load_module(
+                    MemoryModule,
+                    memory_config
+                )
+                logger.info("✅ SQLite Memory module loaded")
+            else:
+                logger.warning(f"Unknown memory type: {memory_type}. No memory module loaded.")
 
     async def forward_metrics_to_ui(self, websocket: WebSocket, event_name: str, metrics_data: dict):
         """Forward metrics data to a specific WebSocket client."""

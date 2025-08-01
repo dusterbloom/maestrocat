@@ -99,14 +99,18 @@ export class WebSocketManager extends EventEmitter {
     this.reconnectDelay = Math.min(this.reconnectDelay * 1.5, 30000);
   }
   
-  send(data) {
+  send(type, data) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      console.warn('WebSocket not connected');
+      console.warn('WebSocket not connected, cannot send event.');
       return false;
     }
     
     try {
-      this.ws.send(JSON.stringify(data));
+      const message = {
+        type: type,
+        data: data
+      };
+      this.ws.send(JSON.stringify(message));
       return true;
     } catch (error) {
       console.error('Failed to send WebSocket message:', error);
@@ -115,14 +119,7 @@ export class WebSocketManager extends EventEmitter {
   }
   
   sendConfigUpdate(component, settings) {
-    const message = {
-      type: 'config_update',
-      component,
-      settings
-    };
-    
-    console.log(`📡 Sending config update via WebSocket:`, message);
-    const result = this.send(message);
+    const result = this.send('config_update', { component, settings });
     
     if (!result) {
       console.error(`❌ Failed to send config update for ${component}:`, settings);

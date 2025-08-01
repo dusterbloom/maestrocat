@@ -10,6 +10,7 @@ import { CommandPalette } from './modules/command-palette.js';
 import { EventManager } from './modules/events.js';
 import { StateManager } from './modules/state.js';
 import { TranscriptionManager } from './modules/transcription.js';
+import { initAMem, handleAMemUpdate } from './modules/amem.js';
 
 class MaestroCatDebugApp {
   constructor() {
@@ -223,6 +224,10 @@ class MaestroCatDebugApp {
       case 'interruption_detected':
         this.audio.stopAllAudio();
         break;
+      
+      case 'amem_updated':
+        handleAMemUpdate(event);
+        break;
     }
   }
   
@@ -404,6 +409,9 @@ class MaestroCatDebugApp {
     
     // Initialize audio (but don't connect yet)
     await this.audio.init();
+    
+    // Initialize A-Mem module
+    await initAMem();
     
     console.log('MaestroCat Debug UI initialized');
   }

@@ -79,6 +79,8 @@ class DebugUIServer:
         self.event_history = []
         self.transcription_buffer = {}
         self.active_sessions = set()
+        self._amem_memories = {}
+        self.amem_module = None
         
     def attach_event_emitter(self, event_emitter: EventEmitter):
         """Attach to pipeline's event emitter"""
@@ -122,6 +124,11 @@ class DebugUIServer:
             transcript_id = event["data"].get("transcript_id")
             if transcript_id and transcript_id in self.transcription_buffer:
                 del self.transcription_buffer[transcript_id]
+        
+        elif event["type"] == "amem_updated":
+            # Update A-Mem memories
+            memory = event["data"]
+            self._amem_memories[memory["id"]] = memory
             
         # Broadcast to connected clients
         await manager.broadcast({
@@ -367,6 +374,22 @@ async def get_status():
         "transcription_buffers": len(debug_server.transcription_buffer),
         "uptime": datetime.now().isoformat()
     }
+
+
+@app.get("/api/amem")
+async def get_amem_memories():
+    """Get all A-Mem memories"""
+    return list(debug_server._amem_memories.values())
+
+
+@app.get("/api/amem/all")
+async def get_all_amem_memories():
+    """Get all A-Mem memories from the database."""
+    if debug_server and hasattr(debug_server, "amem_module") and debug_server.amem_module:
+        return await debug_server.amem_module.chroma_manager.get_all_memories()
+    return []
+
+
 
 
 # Simple HTML UI (fallback if ui/ directory doesn't exist)

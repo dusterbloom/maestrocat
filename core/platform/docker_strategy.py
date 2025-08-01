@@ -299,7 +299,7 @@ class DockerPlatformStrategy(PlatformStrategy):
             vad_threshold=0.3
         )
     
-    async def create_llm_service(self, event_emitter=None):
+    async def create_llm_service(self, event_emitter=None, amem_module=None):
         """Create Ollama LLM service"""
         # Ensure URL has /v1 suffix for OpenAI compatibility
         base_url = self.config.llm.base_url
@@ -310,7 +310,8 @@ class DockerPlatformStrategy(PlatformStrategy):
             model=self.config.llm.model,
             base_url=base_url,
             temperature=getattr(self.config.llm, 'temperature', 0.7),
-            max_tokens=getattr(self.config.llm, 'max_tokens', 1000)
+            max_tokens=getattr(self.config.llm, 'max_tokens', 1000),
+            amem_module=amem_module
         )
     
     async def create_tts_service(self, event_emitter=None):

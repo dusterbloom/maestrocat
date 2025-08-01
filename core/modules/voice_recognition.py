@@ -13,7 +13,7 @@ import hashlib
 import json
 import os
 
-from ..processors.module_loader import MaestroCatModule
+from .base import MaestroCatModule
 from pipecat.frames.frames import AudioRawFrame, InputAudioRawFrame, UserAudioRawFrame
 
 logger = logging.getLogger(__name__)
