@@ -25,12 +25,12 @@ class OLLamaLLMService(LLMService):
         self,
         *,
         base_url: str = "http://localhost:11434",
-        model: str = "llama3.2:3b",
-        temperature: float = 0.7,
-        max_tokens: int = 1000,
+        model: str = "gemma3:4b",
+        temperature: float = 0.5,
+        max_tokens: int = 200,
         top_p: float = 0.9,
         top_k: int = 40,
-        repetition_penalty: float = 1.1,
+        repetition_penalty: float = 1.3,
         event_emitter = None,
         **kwargs
     ):

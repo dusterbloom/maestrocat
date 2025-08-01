@@ -13,7 +13,7 @@ language_config:
   it:
     voice: "if_sara"
     stt_language: "it"
-    system_prompt: "Sei MaestroCat, un assistente vocale AI utile. Rispondi sempre in italiano. Mantieni le risposte brevi e conversazionali. Se vengo interrotto, riconoscilo naturalmente. Quando incontri qualcuno di nuovo, chiedi educatamente il suo nome per personalizzare la conversazione. Quando ricevi un messaggio [System: Recognized returning user - NOME is back], salutalo calorosamente per nome."
+    system_prompt: "Sei MaestroCat, un assistente vocale AI utile. Rispondi sempre in italiano. Mantieni le risposte brevi e conversazionali. Se vengo interrotto, riconoscilo naturalmente. Quando incontri qualcuno di nuovo, chiedi educatamente il suo nome per personalizzare la conversazione. Quando ricevi un messaggio [System: Recognized returning user - NOME is back], salutalo calorosamente per nome. Rispondi solo con testo semplice, senza emoji o simboli speciali."
   fr:
     voice: "ff_siwis"
     stt_language: "fr"
@@ -47,11 +47,15 @@ stt:
 
 # Base LLM configuration  
 llm:
-  model: "llama3.2:3b"
-  temperature: 0.7
-  max_tokens: 400
+  base_url: "http://localhost:11434"  # Local Ollama service (install with 'brew install ollama')
+  model: "gemma3:4b"               # Fastest model for sub-second response
+  temperature: 0.5
+  repetition_penalty: 1.3  # Discourage the model from repeating itself
+  max_tokens: 150                    # Reduced for faster generation
   top_p: 0.9
   top_k: 40
+  system_prompt: "You are MaestroCat, a helpful AI voice assistant. Keep responses very brief and conversational."
+
 
 # Base TTS configuration
 tts:
@@ -69,17 +73,17 @@ modules:
     model: "speechbrain"  # Options: "speechbrain", "pyannote", "mock"
     sample_rate: 16000
     window_size: 3.0  # seconds of audio for analysis
-    confidence_threshold: 0.55  # Lowered for real-world conditions (was 0.99)
+    confidence_threshold: 0.85  # Lowered for real-world conditions (was 0.99)
     min_speech_duration: 1.0  # Minimum speech before attempting identification
     profile_dir: "data/speaker_profiles"  # Directory for speaker profiles
     # Automatic enrollment - the magic happens here!
     auto_enroll:
       min_utterances: 3  # Learn a voice after 3 consistent utterances
-      consistency_threshold: 0.60  # Lowered for real-world audio (was 0.95)
-      min_consistency_threshold: 0.45  # Minimum threshold for collecting utterances (was 0.70)
+      consistency_threshold: 0.80  # Lowered for real-world audio (was 0.95)
+      min_consistency_threshold: 0.70  # Minimum threshold for collecting utterances (was 0.70)
       enrollment_window_minutes: 30  # Consider utterances within 30 minute window
       new_speaker_grace_period_seconds: 120  # Grace period after enrollment
-      new_speaker_similarity_threshold: 0.50  # Lower threshold during grace period
+      new_speaker_similarity_threshold: 0.80  # Lower threshold during grace period
     # Speaker enrollment settings
     enrollment:
       min_samples: 3  # Minimum audio samples for enrollment
@@ -89,7 +93,7 @@ modules:
       queue_size: 100  # Max audio chunks in processing queue
       use_gpu: false  # Disable GPU for CPU optimization on macOS
   memory:
-    enabled: true
+    enabled: false
     type: "sqlite"  # Using SQLite for persistent storage
     database_path: "data/memory/conversations.db"
     max_history: 1000  # Maximum messages to keep per session
@@ -97,7 +101,7 @@ modules:
     context_window_minutes: 30  # Time window for context retrieval
     # Context injection settings for LLM
     context_injection:
-      enabled: true
+      enabled: false
       max_messages: 5  # Number of recent messages to inject
       time_window_minutes: 5  # Recent context time window
     # Database maintenance
@@ -155,8 +159,8 @@ platforms:
   # macOS native platform configuration  
   macos_native:
     stt:
-      service: "whispercpp_streaming"    # MLX Whisper for Apple Silicon optimization
-      model_size: "base"                # Small model for good accuracy
+      service: "mlx_whisper"    # MLX Whisper for Apple Silicon optimization
+      model_size: "large-v3-turbo-q4"                # Small model for good accuracy
       sample_rate: 16000
       channels: 1                        # Mono audio
       block_size: 512                    # Audio chunk size (512 = responsive)

@@ -61,12 +61,13 @@ class UnifiedSTTConfig:
 class UnifiedLLMConfig:
     """Large Language Model configuration"""
     base_url: str = "http://localhost:11434"
-    model: str = "llama3.2:3b"
-    temperature: float = 0.7
+    model: str = "gemma3:4b"
+    temperature: float = 0.5
     max_tokens: int = 150
     top_p: float = 0.9
+    repetition_penalty: float = 1.3  # Discourage the model from repeating itself
     top_k: int = 40
-    system_prompt: str = "You are MaestroCat, a helpful AI voice assistant."
+    system_prompt: str = "You are MaestroCat, a helpful AI voice assistant. Keep responses very brief and conversational. Never use emojis, emoticons, or special symbols in your responses - only plain text."
 
 
 @dataclass
